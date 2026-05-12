@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# Generated export files
+arch-viz-*.json
+arch-viz-*.mmd
+*-architecture.excalidraw
+
+# OpenCode
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+
+# OpenHUD (cloned repo)
+.openhud/
+
+# macOS
+.DS_Store
+
+# Secrets
+.env
+.env.*
+.vscode/launch.json

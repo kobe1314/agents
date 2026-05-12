@@ -1,0 +1,615 @@
+#!/usr/bin/env python3
+"""
+Arch-Viz: Architecture Visualization CLI for Multi-Agent OpenCode Projects.
+
+Usage:
+    ./arch-viz                 # Terminal dashboard (default)
+    ./arch-viz --export excalidraw  # Export Excalidraw diagram
+    ./arch-viz --export mermaid     # Export Mermaid diagram
+    ./arch-viz --export json        # Export raw JSON data
+    ./arch-viz --watch              # Watch mode (auto-refresh)
+
+Collects live data from:
+  - opencode.json       → Agent/MCP config
+  - AGENTS.md           → Agent descriptions & workflows
+  - .agents/skills/*/   → Installed skills + SKILL.md
+  - skills-lock.json    → Skill source tracking
+  - .opencode/rules/    → Rule files
+"""
+
+import json
+import os
+import re
+import sys
+import textwrap
+import time
+from dataclasses import dataclass, field, asdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
+# ─── Config ────────────────────────────────────────────────────────────────
+PROJECT_ROOT = Path(__file__).parent.resolve()
+
+# ─── Data Models ───────────────────────────────────────────────────────────
+
+
+@dataclass
+class AgentNode:
+    name: str
+    mode: str  # primary | subagent
+    model: str
+    tools: list[str]
+    description: str
+    color: Optional[str] = None
+
+
+@dataclass
+class SkillNode:
+    name: str
+    path: str
+    description: str
+    version: Optional[str] = None
+    source: Optional[str] = None
+
+
+@dataclass
+class MCPNode:
+    name: str
+    type: str  # local | remote
+    command: Optional[list[str]] = None
+    url: Optional[str] = None
+    enabled: bool = True
+    status: str = "unknown"
+
+
+@dataclass
+class RuleNode:
+    path: str
+    name: str
+    size: int
+
+
+@dataclass
+class TopologyGraph:
+    project_name: str = "agents"
+    platform: str = sys.platform
+    collected_at: str = ""
+    agents: list[AgentNode] = field(default_factory=list)
+    skills: list[SkillNode] = field(default_factory=list)
+    mcps: list[MCPNode] = field(default_factory=list)
+    rules: list[RuleNode] = field(default_factory=list)
+    commands: list[dict] = field(default_factory=list)
+    total_agents: int = 0
+    total_skills: int = 0
+    total_mcps: int = 0
+    agent_workflows: list[str] = field(default_factory=list)
+
+
+# ─── Collectors ────────────────────────────────────────────────────────────
+
+
+def read_json(path: Path) -> dict:
+    """Safely read a JSON file."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def read_file(path: Path) -> str:
+    """Safely read a text file."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
+def collect_agents(config: dict, agents_md: str) -> list[AgentNode]:
+    """Collect agents from opencode.json and AGENTS.md."""
+    agents = []
+    raw_agents = config.get("agent", {})
+
+    # Parse AGENTS.md for agent descriptions
+    agent_descriptions: dict[str, str] = {}
+    md_table_pattern = re.compile(
+        r"\|\s*`(@?\w+)`\s*\|.*?\|.*?\|(.+?)(?=\||$)"
+    )
+    for match in md_table_pattern.finditer(agents_md):
+        name = match.group(1).lstrip("@")
+        desc = match.group(2).strip()
+        agent_descriptions[name] = desc
+
+    # Parse workflows from AGENTS.md
+    for name, raw in raw_agents.items():
+        tools = []
+        perms = raw.get("permission", {})
+        if isinstance(perms, dict):
+            for tool, action in perms.items():
+                if action in ("allow", True):
+                    tools.append(tool)
+
+        desc = agent_descriptions.get(name, raw.get("description", ""))
+        if not desc:
+            desc = raw.get("prompt", "")[:60] + "..." if raw.get("prompt") else ""
+
+        agents.append(AgentNode(
+            name=name,
+            mode=raw.get("mode", "primary"),
+            model=raw.get("model", ""),
+            tools=sorted(tools),
+            description=desc,
+            color=raw.get("color"),
+        ))
+
+    return agents
+
+
+def collect_skills(skills_path: Path, lock_data: dict) -> list[SkillNode]:
+    """Scan .agents/skills/ for installed skills."""
+    skills = []
+    lock_skills = lock_data.get("skills", {})
+
+    if not skills_path.is_dir():
+        return skills
+
+    for skill_dir in sorted(skills_path.iterdir()):
+        if not skill_dir.is_dir() or skill_dir.name.startswith("."):
+            continue
+
+        meta_path = skill_dir / "SKILL.md"
+        description = ""
+        version = None
+        if meta_path.exists():
+            content = meta_path.read_text(encoding="utf-8")
+            # Extract first line as description
+            first_line = content.strip().split("\n")[0].lstrip("# ")
+            description = first_line[:100] if first_line else ""
+            # Extract version from SKILL.md
+            ver_match = re.search(r"version:\s*([\d.]+)", content, re.IGNORECASE)
+            if ver_match:
+                version = ver_match.group(1)
+
+        source = None
+        if skill_dir.name in lock_skills:
+            source = lock_skills[skill_dir.name].get("source", "")
+
+        skills.append(SkillNode(
+            name=skill_dir.name,
+            path=str(skill_dir),
+            description=description,
+            version=version,
+            source=source,
+        ))
+
+    return skills
+
+
+def collect_mcps(config: dict) -> list[MCPNode]:
+    """Collect MCP servers from opencode.json."""
+    mcps = []
+    raw_mcps = config.get("mcp", {})
+
+    for name, raw in raw_mcps.items():
+        mcp_type = raw.get("type", "local")
+        mcps.append(MCPNode(
+            name=name,
+            type=mcp_type,
+            command=raw.get("command"),
+            url=raw.get("url"),
+            enabled=raw.get("enabled", True),
+            status="connected" if raw.get("enabled", True) else "disabled",
+        ))
+
+    return mcps
+
+
+def collect_rules(rules_path: Path) -> list[RuleNode]:
+    """Scan .opencode/rules/ for rule files."""
+    rules = []
+    if not rules_path.is_dir():
+        return rules
+
+    for rule_file in sorted(rules_path.iterdir()):
+        if rule_file.suffix in (".md", ".txt", ".json"):
+            rules.append(RuleNode(
+                path=str(rule_file),
+                name=rule_file.stem,
+                size=rule_file.stat().st_size,
+            ))
+
+    return rules
+
+
+def collect_commands(config: dict) -> list[dict]:
+    """Collect custom slash commands."""
+    commands = config.get("command", {})
+    return [{"name": k, **v} for k, v in commands.items()] if isinstance(commands, dict) else []
+
+
+def parse_workflows(agents_md: str) -> list[str]:
+    """Extract workflow descriptions from AGENTS.md."""
+    workflows = []
+    in_code_block = False
+    for line in agents_md.split("\n"):
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block and line.strip():
+            workflows.append(line.strip())
+    return workflows
+
+
+def build_graph() -> TopologyGraph:
+    """Main orchestrator: run all collectors and build the topology graph."""
+    config = read_json(PROJECT_ROOT / "opencode.json")
+    agents_md = read_file(PROJECT_ROOT / "AGENTS.md")
+    lock_data = read_json(PROJECT_ROOT / "skills-lock.json")
+
+    graph = TopologyGraph(
+        project_name=PROJECT_ROOT.name,
+        collected_at=datetime.now().isoformat(),
+        agents=collect_agents(config, agents_md),
+        skills=collect_skills(PROJECT_ROOT / ".agents" / "skills", lock_data),
+        mcps=collect_mcps(config),
+        rules=collect_rules(PROJECT_ROOT / ".opencode" / "rules"),
+        commands=collect_commands(config),
+        agent_workflows=parse_workflows(agents_md),
+    )
+    graph.total_agents = len(graph.agents)
+    graph.total_skills = len(graph.skills)
+    graph.total_mcps = len(graph.mcps)
+
+    return graph
+
+
+# ─── Renderers ─────────────────────────────────────────────────────────────
+
+
+def colorize(text: str, color: str) -> str:
+    """Simple terminal color wrapper."""
+    colors = {
+        "reset": "\033[0m",
+        "bold": "\033[1m",
+        "dim": "\033[2m",
+        "red": "\033[91m",
+        "green": "\033[92m",
+        "yellow": "\033[93m",
+        "blue": "\033[94m",
+        "magenta": "\033[95m",
+        "cyan": "\033[96m",
+        "white": "\033[97m",
+    }
+    c = colors.get(color, "")
+    return f"{c}{text}\033[0m" if c else text
+
+
+def render_agents_table(agents: list[AgentNode]) -> str:
+    """Render agents as a formatted table."""
+    if not agents:
+        return "  (no agents configured)"
+
+    lines = []
+    lines.append(f"  {'Agent':<16} {'Mode':<10} {'Model':<28} {'Tools':<25} {'Description'}")
+    lines.append(f"  {'─'*16} {'─'*10} {'─'*28} {'─'*25} {'─'*30}")
+
+    for a in agents:
+        name = f"@{a.name}"
+        tools = ", ".join(a.tools[:4])
+        if len(a.tools) > 4:
+            tools += "..."
+        desc = a.description[:28] + "..." if len(a.description) > 28 else a.description
+        lines.append(f"  {name:<16} {a.mode:<10} {a.model:<28} {tools:<25} {desc}")
+
+    return "\n".join(lines)
+
+
+def render_skills_tree(skills: list[SkillNode]) -> str:
+    """Render skills as a tree view."""
+    if not skills:
+        return "  (no skills installed)"
+
+    lines = []
+    for s in skills:
+        version = f" v{s.version}" if s.version else ""
+        source = f" [{s.source}]" if s.source else ""
+        desc = f"  {s.description[:60]}" if s.description else ""
+        lines.append(f"  ├── {colorize(s.name, 'cyan')}{version}{source}")
+        if desc:
+            lines.append(f"  │   {colorize(desc, 'dim')}")
+
+    return "\n".join(lines)
+
+
+def render_mcp_table(mcps: list[MCPNode]) -> str:
+    """Render MCP servers as a status table."""
+    if not mcps:
+        return "  (no MCP servers configured)"
+
+    lines = []
+    lines.append(f"  {'Name':<20} {'Type':<8} {'Status':<12} {'Endpoint'}")
+    lines.append(f"  {'─'*20} {'─'*8} {'─'*12} {'─'*40}")
+
+    for m in mcps:
+        status_color = "green" if m.status == "connected" else "yellow" if m.status == "unknown" else "red"
+        status = colorize(m.status, status_color)
+        endpoint = " ".join(m.command) if m.command else (m.url or "-")
+        endpoint = endpoint[:40] + "..." if len(endpoint) > 40 else endpoint
+        lines.append(f"  {m.name:<20} {m.type:<8} {status:<12} {endpoint}")
+
+    return "\n".join(lines)
+
+
+def render_rules_list(rules: list[RuleNode]) -> str:
+    """Render rule files."""
+    if not rules:
+        return "  (no rule files)"
+    return "\n".join(f"  ├── {r.name}.md  ({r.size} bytes)" for r in rules)
+
+
+def render_summary(graph: TopologyGraph) -> str:
+    """Render summary panel with stats."""
+    active_agents = sum(1 for a in graph.agents if a.mode == "primary")
+    sub_agents = sum(1 for a in graph.agents if a.mode == "subagent")
+    enabled_mcps = sum(1 for m in graph.mcps if m.enabled)
+
+    lines = [
+        f"  {colorize('Project:', 'bold')}       {graph.project_name}",
+        f"  {colorize('Platform:', 'bold')}      {graph.platform}",
+        f"  {colorize('Collected:', 'bold')}     {graph.collected_at[:19]}",
+        "",
+        f"  {colorize('📊 Statistics', 'bold')}",
+        f"  ├── Agents:    {graph.total_agents} ({active_agents} primary + {sub_agents} sub)",
+        f"  ├── Skills:    {graph.total_skills}",
+        f"  ├── MCPs:      {graph.total_mcps} ({enabled_mcps} enabled)",
+        f"  ├── Commands:  {len(graph.commands)}",
+        f"  └── Rules:     {len(graph.rules)}",
+    ]
+    return "\n".join(lines)
+
+
+def render_workflows(workflows: list[str]) -> str:
+    """Render workflow pipelines."""
+    if not workflows:
+        return "  (no workflows defined)"
+    return "\n".join(f"  {colorize('⤷', 'dim')} {w}" for w in workflows)
+
+
+def render_dashboard(graph: TopologyGraph) -> str:
+    """Render the full terminal dashboard."""
+    sep = colorize("─" * 70, "dim")
+
+    sections = [
+        (f"\n{colorize(' 🧠  ARCH-VIZ  ·  Architecture Visualization', 'bold',)}{colorize(f'  ({graph.collected_at[:19]})', 'dim')}"),
+        sep,
+        ("", render_summary(graph)),
+        "",
+        sep,
+        (f"\n{colorize(' 🤖  Agents', 'bold')}  {colorize(f'({graph.total_agents} total)', 'dim')}", render_agents_table(graph.agents)),
+        "",
+        sep,
+        (f"\n{colorize(' 🛠️  Skills', 'bold')}  {colorize(f'({graph.total_skills} installed)', 'dim')}", render_skills_tree(graph.skills)),
+        "",
+        sep,
+        (f"\n{colorize(' 🔗  MCP Servers', 'bold')}  {colorize(f'({graph.total_mcps} configured)', 'dim')}", render_mcp_table(graph.mcps)),
+        "",
+        sep,
+        (f"\n{colorize(' 📜  Workflows', 'bold')}", render_workflows(graph.agent_workflows)),
+        "",
+        sep,
+        (f"\n{colorize(' 📋  Custom Commands', 'bold')}", render_commands(graph.commands) if graph.commands else "  (none)"),
+        "",
+        sep,
+        (f"\n{colorize(' 📁  Rule Files', 'bold')}", render_rules_list(graph.rules)),
+        "",
+        sep,
+        colorize(f"\n ✅  Collected from {len(graph.agents) + len(graph.skills) + len(graph.mcps)} data sources  |  Use --export to generate diagrams\n", "dim"),
+    ]
+
+    output = []
+    for section in sections:
+        if isinstance(section, tuple):
+            title, content = section
+            output.append(title)
+            output.append(content)
+        else:
+            output.append(section)
+
+    return "\n".join(output)
+
+
+def render_commands(commands: list[dict]) -> str:
+    """Render custom commands."""
+    if not commands:
+        return "  (no commands)"
+    lines = []
+    for cmd in commands:
+        agent = cmd.get("agent", "")
+        desc = cmd.get("description", cmd.get("template", "")[:40])
+        lines.append(f"  ├── /{cmd['name']:<12} → @{agent:<12} {desc}")
+    return "\n".join(lines)
+
+
+# ─── Exporters ─────────────────────────────────────────────────────────────
+
+
+def export_json(graph: TopologyGraph, path: Path) -> str:
+    """Export graph data as JSON."""
+    data = {
+        "project": graph.project_name,
+        "collected_at": graph.collected_at,
+        "agents": [asdict(a) for a in graph.agents],
+        "skills": [asdict(s) for s in graph.skills],
+        "mcps": [asdict(m) for m in graph.mcps],
+        "rules": [asdict(r) for r in graph.rules],
+        "commands": graph.commands,
+        "workflows": graph.agent_workflows,
+        "statistics": {
+            "agents": graph.total_agents,
+            "skills": graph.total_skills,
+            "mcps": graph.total_mcps,
+        },
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return str(path)
+
+
+def export_mermaid(graph: TopologyGraph, path: Path) -> str:
+    """Export as Mermaid flowchart."""
+    lines = ["graph TD", f'  title["{graph.project_name} Architecture"]', '  title:::hidden', ""]
+
+    # Agents
+    lines.append("  %% Agents")
+    for a in graph.agents:
+        tools = ", ".join(a.tools[:3]) if a.tools else "read-only"
+        lines.append(f'  agent_{a.name}["@{a.name}\\n{a.model.split("/")[-1]}\\n({tools})"]')
+
+    lines.append("")
+    lines.append("  %% Agent Relationships")
+    # Link plan → build → reviewer
+    if any(a.name == "plan" for a in graph.agents):
+        lines.append("  agent_plan -->|designs| agent_build")
+    if any(a.name == "build" for a in graph.agents) and any(a.name == "reviewer" for a in graph.agents):
+        lines.append("  agent_build -->|reviewed by| agent_reviewer")
+    if any(a.name == "build" for a in graph.agents) and any(a.name == "test" for a in graph.agents):
+        lines.append("  agent_build -->|tested by| agent_test")
+
+    lines.append("")
+    lines.append("  %% Skills")
+    lines.append("  subgraph Skills[Installed Skills]")
+    for s in graph.skills:
+        lines.append(f'    skill_{s.name}["{s.name}"]')
+    lines.append("  end")
+
+    lines.append("")
+    lines.append("  %% MCP")
+    for m in graph.mcps:
+        status_icon = "✅" if m.enabled else "❌"
+        lines.append(f'  mcp_{m.name}["{status_icon} {m.name} ({m.type})"]')
+
+    lines.append("")
+    lines.append("  %% Styling")
+    lines.append("  classDef primary fill:#d0ebff,stroke:#1e1e1e")
+    lines.append("  classDef subagent fill:#f1f3f5,stroke:#868e96,stroke-dasharray: 5 5")
+    lines.append("  classDef hidden display:none")
+
+    # Apply classes
+    for a in graph.agents:
+        cls = "primary" if a.mode == "primary" else "subagent"
+        lines.append(f"  class agent_{a.name} {cls}")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    return str(path)
+
+
+def export_excalidraw(graph: TopologyGraph, path: Path) -> str:
+    """Export as Excalidraw diagram (reuse the existing generator)."""
+    # Try to run the existing generate-arch-viz-diagram.py
+    generator = PROJECT_ROOT / "generate-arch-viz-diagram.py"
+    if generator.exists():
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(generator)],
+            capture_output=True, text=True, cwd=PROJECT_ROOT
+        )
+        if result.returncode == 0:
+            return str(PROJECT_ROOT / "arch-viz-architecture.excalidraw")
+        else:
+            print(f"Warning: generator failed: {result.stderr}", file=sys.stderr)
+            return ""
+
+    # Fallback: generate minimal diagram
+    print("Note: generate-arch-viz-diagram.py not found, generating minimal diagram", file=sys.stderr)
+    return ""
+
+
+# ─── Main CLI ──────────────────────────────────────────────────────────────
+
+
+def print_help():
+    print(textwrap.dedent("""\
+    Usage: ./arch-viz [OPTIONS]
+
+    Architecture Visualization CLI for Multi-Agent OpenCode Projects.
+
+    Options:
+        --export FORMAT    Export diagram (excalidraw | mermaid | json)
+        --output FILE      Output file path (default: auto-generated)
+        --watch            Watch mode (refresh every 5s)
+        --json             Alias for --export json
+        --mermaid          Alias for --export mermaid
+        --help             Show this message
+    """))
+
+
+def main():
+    args = sys.argv[1:]
+
+    if "--help" in args or "-h" in args:
+        print_help()
+        return
+
+    export_format = None
+    output_path = None
+    watch_mode = "--watch" in args
+
+    # Parse --export
+    if "--export" in args:
+        idx = args.index("--export")
+        if idx + 1 < len(args):
+            export_format = args[idx + 1]
+    if "--json" in args:
+        export_format = "json"
+    if "--mermaid" in args:
+        export_format = "mermaid"
+
+    # Parse --output
+    if "--output" in args:
+        idx = args.index("--output")
+        if idx + 1 < len(args):
+            output_path = args[idx + 1]
+
+    if watch_mode:
+        try:
+            while True:
+                os.system("clear" if sys.platform != "win32" else "cls")
+                graph = build_graph()
+                print(render_dashboard(graph))
+                time.sleep(5)
+        except KeyboardInterrupt:
+            print("\nExiting watch mode.")
+        return
+
+    graph = build_graph()
+
+    if export_format:
+        exporters = {
+            "json": (export_json, ".json"),
+            "mermaid": (export_mermaid, ".mmd"),
+            "excalidraw": (export_excalidraw, ".excalidraw"),
+        }
+
+        if export_format not in exporters:
+            print(f"Unknown export format: {export_format}")
+            print(f"Supported: {', '.join(exporters.keys())}")
+            sys.exit(1)
+
+        exporter, ext = exporters[export_format]
+        if not output_path:
+            output_path = f"arch-viz-{export_format}{ext}"
+
+        result = exporter(graph, Path(output_path))
+        if result:
+            print(f"✅ Exported: {result}")
+        else:
+            print("❌ Export failed")
+    else:
+        print(render_dashboard(graph))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,165 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "deepseek/deepseek-v4-flash",
+  "small_model": "deepseek/deepseek-v4-flash",
+  "default_agent": "build",
+  "autoupdate": true,
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 10000
+  },
+  "permission": {
+    "edit": "allow",
+    "bash": "allow",
+    "webfetch": "allow"
+  },
+  "agent": {
+    "plan": {
+      "mode": "primary",
+      "model": "deepseek/deepseek-reasoner",
+      "prompt": "You are a senior software architect. Break down tasks into clear, executable steps. Focus on architecture, design decisions, and risk analysis. Never write code directly.",
+      "color": "info",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "build": {
+      "mode": "primary",
+      "model": "deepseek/deepseek-v4-flash",
+      "prompt": "You are a senior software engineer. Write clean, production-ready code following best practices. Implement features and fix bugs efficiently.",
+      "color": "success",
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "reviewer": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-reasoner",
+      "description": "Review code for bugs, security issues, and performance problems",
+      "prompt": "You are a senior code reviewer. Analyze code for bugs, security vulnerabilities, performance issues, and maintainability concerns. Provide actionable feedback.",
+      "color": "warning",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "debugger": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-flash",
+      "description": "Debug and fix runtime errors",
+      "prompt": "You are a debugger. Analyze error logs, stack traces, and runtime behavior to identify and fix issues efficiently.",
+      "color": "error",
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "test": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-flash",
+      "description": "Write and run tests",
+      "prompt": "You are a QA engineer. Write comprehensive unit/integration tests. Run test suites and fix failures. Aim for high coverage and meaningful assertions.",
+      "color": "accent",
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "docs": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-pro",
+      "description": "Write and update documentation",
+      "prompt": "You are a technical writer. Write clear, concise, and well-structured documentation. Focus on readability and completeness.",
+      "color": "secondary",
+      "permission": {
+        "edit": "allow",
+        "bash": "deny"
+      }
+    },
+    "refactor": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-v4-flash",
+      "description": "Refactor code for better quality",
+      "prompt": "You are a senior software engineer specializing in code quality. Refactor code to improve readability, maintainability, and performance without changing behavior.",
+      "color": "primary",
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "architect": {
+      "mode": "subagent",
+      "model": "deepseek/deepseek-reasoner",
+      "description": "Design architecture and make technical decisions",
+      "prompt": "You are a software architect. Design system architecture, evaluate trade-offs, and make technical recommendations. Never write implementation code.",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    }
+  },
+  "command": {
+    "test": {
+      "template": "Run the full test suite, analyze all failures, and fix them. For each failure: explain the root cause and the fix applied.",
+      "description": "Run tests and fix failures",
+      "agent": "test"
+    },
+    "commit": {
+      "template": "Analyze git diff --staged (or all changes if nothing staged). Create a well-structured commit with a clear message following conventional commits format.",
+      "description": "Commit changes with good message",
+      "agent": "build"
+    },
+    "docs": {
+      "template": "Generate or update documentation for the recent changes. Include README updates, API docs, and inline comments as needed.",
+      "description": "Generate documentation",
+      "agent": "docs"
+    },
+    "fix": {
+      "template": "Find and fix all lint errors, type errors, and common code quality issues across the project. Run the fix tools and verify.",
+      "description": "Auto-fix lint/style/type issues",
+      "agent": "build",
+      "model": "deepseek/deepseek-v4-flash"
+    },
+    "review": {
+      "template": "Review the current uncommitted changes (git diff) for bugs, security issues, performance problems, and code quality. Provide a structured report.",
+      "description": "Review current changes",
+      "agent": "reviewer"
+    },
+    "plan": {
+      "template": "Create a detailed implementation plan for the requested feature or change. Include architecture decisions, component breakdown, and risk assessment.",
+      "description": "Create implementation plan",
+      "agent": "plan"
+    },
+    "deploy": {
+      "template": "Analyze the project and create a deployment plan. Check for common deployment issues and verify the build.",
+      "description": "Create deployment plan",
+      "agent": "architect"
+    }
+  },
+  "lsp": true,
+  "formatter": true,
+  "instructions": [
+    ".opencode/rules/*.md"
+  ],
+  "skills": {
+    "paths": [
+      ".agents/skills/excalidraw-diagram-generator",
+      ".agents/skills/find-skills",
+      ".agents/skills/ce-commit-push-pr",
+      ".agents/skills/self-improving-agent"
+    ]
+  },
+  "mcp": {
+    "github": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
+      "enabled": true,
+      "environment": {
+        "GITHUB_TOKEN": "TOKEN_REMOVED"
+      }
+    }
+  }
+}

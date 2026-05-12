@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "agent-browser": {
+      "name": "Agent Browser",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=agent-browser",
+      "source": "skillhub",
+      "version": "0.2.0"
+    },
+    "agent-memory": {
+      "name": "Agent Memory",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=agent-memory",
+      "source": "skillhub",
+      "version": "1.0.0"
+    },
+    "react-best-practices": {
+      "name": "React Best Practices",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=react-best-practices",
+      "source": "skillhub",
+      "version": "1.0.0"
+    }
+  }
+}

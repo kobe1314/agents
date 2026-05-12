@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "skills": {
+    "ce-commit-push-pr": {
+      "source": "everyinc/compound-engineering-plugin",
+      "sourceType": "github",
+      "skillPath": "plugins/compound-engineering/skills/ce-commit-push-pr/SKILL.md",
+      "computedHash": "b0e7bdfecd851507d1e0eef9c5506d8bd92c2b3164d80952f839156e9e23428d"
+    },
+    "excalidraw-diagram-generator": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "20bad48f0ec420a42b445ee6562b5d954be42754e9c21f9db8c6b2a7f91cbed5"
+    },
+    "trigger-cost-savings": {
+      "source": "triggerdotdev/skills",
+      "sourceType": "github",
+      "skillPath": "trigger-cost-savings/SKILL.md",
+      "computedHash": "4d41360e1f7544c1c28c4e097e72243bd8b88a9c8d91a37974a75f683c1bace1"
+    }
+  }
+}
