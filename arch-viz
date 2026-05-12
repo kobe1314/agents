@@ -164,13 +164,26 @@ def collect_skills(skills_path: Path, lock_data: dict) -> list[SkillNode]:
         version = None
         if meta_path.exists():
             content = meta_path.read_text(encoding="utf-8")
-            # Extract first line as description
-            first_line = content.strip().split("\n")[0].lstrip("# ")
-            description = first_line[:100] if first_line else ""
-            # Extract version from SKILL.md
-            ver_match = re.search(r"version:\s*([\d.]+)", content, re.IGNORECASE)
-            if ver_match:
-                version = ver_match.group(1)
+            # Parse YAML front matter and extract description
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    yaml_block = parts[1]
+                    # Extract description from YAML
+                    desc_match = re.search(r'description:\s*["\']?(.+?)["\']?\s*$', yaml_block, re.MULTILINE | re.DOTALL)
+                    if desc_match:
+                        description = desc_match.group(1).strip().strip("'\"").strip()
+                    # Extract version from YAML
+                    ver_match = re.search(r'version:\s*["\']?([\d.]+)["\']?', yaml_block)
+                    if ver_match:
+                        version = ver_match.group(1)
+            # If still no description, skip headings and YAML to find first real sentence
+            if not description:
+                for line in content.split("\n"):
+                    line = line.strip()
+                    if line and not line.startswith("---") and not line.startswith("#") and not line.startswith("name:") and not line.startswith("description:") and not line.startswith("version:"):
+                        description = line[:100]
+                        break
 
         source = None
         if skill_dir.name in lock_skills:
@@ -307,18 +320,19 @@ def render_agents_table(agents: list[AgentNode]) -> str:
 
 
 def render_skills_tree(skills: list[SkillNode]) -> str:
-    """Render skills as a tree view."""
+    """Render skills as a table with descriptions."""
     if not skills:
         return "  (no skills installed)"
 
     lines = []
+    lines.append(f"  {'Name':<30} {'Version':<10} {'Source':<30} {'Description'}")
+    lines.append(f"  {'─'*30} {'─'*10} {'─'*30} {'─'*40}")
     for s in skills:
-        version = f" v{s.version}" if s.version else ""
-        source = f" [{s.source}]" if s.source else ""
-        desc = f"  {s.description[:60]}" if s.description else ""
-        lines.append(f"  ├── {colorize(s.name, 'cyan')}{version}{source}")
-        if desc:
-            lines.append(f"  │   {colorize(desc, 'dim')}")
+        name = colorize(s.name, "cyan")
+        ver = s.version or "-"
+        src = (s.source or "-")[:28]
+        desc = s.description[:50] + "..." if len(s.description) > 50 else s.description
+        lines.append(f"  {name:<30} {ver:<10} {src:<30} {desc}")
 
     return "\n".join(lines)
 
@@ -548,7 +562,11 @@ def render_html(graph: TopologyGraph) -> str:
     for s in graph.skills:
         ver = f" v{s.version}" if s.version else ""
         src = f" [{s.source}]" if s.source else ""
-        skills_lines += f"<li><span class='skill-name'>{s.name}</span>{ver}{src}</li>"
+        desc = s.description[:60] + "..." if len(s.description) > 60 else s.description
+        skills_lines += f"""<tr>
+            <td><span class="skill-name">{s.name}</span>{ver}{src}</td>
+            <td class="skill-desc">{desc}</td>
+        </tr>"""
 
     mcps_rows = ""
     for m in graph.mcps:
@@ -592,6 +610,7 @@ def render_html(graph: TopologyGraph) -> str:
   code {{ background: #1c2128; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #ffa657; }}
   li {{ padding: 4px 0; font-size: 13px; }}
   .skill-name {{ color: #79c0ff; }}
+  .skill-desc {{ color: #8b949e; font-size: 12px; max-width: 400px; }}
   .cmd {{ color: #d2a8ff; font-weight: bold; }}
   .cmd-desc {{ color: #8b949e; font-size: 12px; }}
   .meta {{ color: #8b949e; font-size: 12px; margin-top: 16px; text-align: center; }}
@@ -620,7 +639,10 @@ def render_html(graph: TopologyGraph) -> str:
 
   <div class="section">
     <div class="section-title">🛠️ Skills</div>
-    <div class="section-body"><ul>{skills_lines}</ul></div>
+    <div class="section-body">
+      <table><thead><tr><th>Name</th><th>Description</th></tr></thead>
+      <tbody>{skills_lines}</tbody></table>
+    </div>
   </div>
 
   <div class="section">
