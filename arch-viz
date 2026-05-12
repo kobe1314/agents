@@ -527,6 +527,130 @@ def export_excalidraw(graph: TopologyGraph, path: Path) -> str:
     return ""
 
 
+# ─── HTML Dashboard (for --serve) ──────────────────────────────────────────
+
+
+def render_html(graph: TopologyGraph) -> str:
+    """Render the dashboard as a self-contained HTML page."""
+    agents_rows = ""
+    for a in graph.agents:
+        tools = ", ".join(a.tools[:4])
+        mode_cls = "primary" if a.mode == "primary" else "subagent"
+        agents_rows += f"""<tr class="{mode_cls}">
+            <td><strong>@{a.name}</strong></td>
+            <td>{a.mode}</td>
+            <td><code>{a.model.split('/')[-1]}</code></td>
+            <td>{tools}</td>
+            <td>{a.description[:40]}</td>
+        </tr>"""
+
+    skills_lines = ""
+    for s in graph.skills:
+        ver = f" v{s.version}" if s.version else ""
+        src = f" [{s.source}]" if s.source else ""
+        skills_lines += f"<li><span class='skill-name'>{s.name}</span>{ver}{src}</li>"
+
+    mcps_rows = ""
+    for m in graph.mcps:
+        status = "✅" if m.status == "connected" else "❌"
+        endpoint = " ".join(m.command) if m.command else (m.url or "-")
+        mcps_rows += f"<tr><td>{status} {m.name}</td><td>{m.type}</td><td><code>{endpoint[:50]}</code></td></tr>"
+
+    workflows = "".join(f"<li><code>{w}</code></li>" for w in graph.agent_workflows[:6])
+
+    commands_list = ""
+    for cmd in graph.commands:
+        agent = cmd.get("agent", "")
+        desc = cmd.get("description", "")
+        commands_list += f"<li><span class='cmd'>/{cmd['name']}</span> → @{agent} <span class='cmd-desc'>{desc}</span></li>"
+
+    rules_list = "".join(f"<li>{r.name}.md</li>" for r in graph.rules)
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="10">
+<title>Arch-Viz - {graph.project_name}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }}
+  h1 {{ font-size: 24px; margin-bottom: 4px; color: #58a6ff; }}
+  .subtitle {{ color: #8b949e; font-size: 13px; margin-bottom: 24px; }}
+  .stats {{ display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }}
+  .stat-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 24px; min-width: 120px; }}
+  .stat-card .num {{ font-size: 28px; font-weight: bold; color: #58a6ff; }}
+  .stat-card .label {{ font-size: 12px; color: #8b949e; margin-top: 2px; }}
+  .section {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }}
+  .section-title {{ padding: 12px 16px; font-size: 14px; font-weight: bold; background: #1c2128; border-bottom: 1px solid #30363d; color: #f0f6fc; }}
+  .section-body {{ padding: 12px 16px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+  th {{ text-align: left; padding: 8px; color: #8b949e; font-weight: 500; border-bottom: 1px solid #30363d; }}
+  td {{ padding: 8px; border-bottom: 1px solid #21262d; }}
+  tr.primary td:first-child {{ border-left: 3px solid #58a6ff; }}
+  tr.subagent td:first-child {{ border-left: 3px solid #8b949e; }}
+  code {{ background: #1c2128; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #ffa657; }}
+  li {{ padding: 4px 0; font-size: 13px; }}
+  .skill-name {{ color: #79c0ff; }}
+  .cmd {{ color: #d2a8ff; font-weight: bold; }}
+  .cmd-desc {{ color: #8b949e; font-size: 12px; }}
+  .meta {{ color: #8b949e; font-size: 12px; margin-top: 16px; text-align: center; }}
+  .refresh {{ float: right; font-size: 12px; color: #8b949e; }}
+</style>
+</head>
+<body>
+  <h1>🧠 Arch-Viz  ·  {graph.project_name} Architecture</h1>
+  <div class="subtitle">Last collected: {graph.collected_at[:19]} <span class="refresh">🔄 Auto-refresh every 10s</span></div>
+
+  <div class="stats">
+    <div class="stat-card"><div class="num">{graph.total_agents}</div><div class="label">Agents</div></div>
+    <div class="stat-card"><div class="num">{graph.total_skills}</div><div class="label">Skills</div></div>
+    <div class="stat-card"><div class="num">{graph.total_mcps}</div><div class="label">MCP Services</div></div>
+    <div class="stat-card"><div class="num">{len(graph.commands)}</div><div class="label">Commands</div></div>
+    <div class="stat-card"><div class="num">{len(graph.rules)}</div><div class="label">Rules</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🤖 Agents</div>
+    <div class="section-body">
+      <table><thead><tr><th>Agent</th><th>Mode</th><th>Model</th><th>Tools</th><th>Description</th></tr></thead>
+      <tbody>{agents_rows}</tbody></table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🛠️ Skills</div>
+    <div class="section-body"><ul>{skills_lines}</ul></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🔗 MCP Servers</div>
+    <div class="section-body">
+      <table><thead><tr><th>Name</th><th>Type</th><th>Endpoint</th></tr></thead>
+      <tbody>{mcps_rows}</tbody></table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📜 Workflows</div>
+    <div class="section-body"><ul>{workflows}</ul></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📋 Commands</div>
+    <div class="section-body"><ul>{commands_list}</ul></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📁 Rules</div>
+    <div class="section-body"><ul>{rules_list}</ul></div>
+  </div>
+
+  <div class="meta">🔄 Page auto-refreshes every 10 seconds · Press Ctrl+C in terminal to stop</div>
+</body>
+</html>"""
+
+
 # ─── Main CLI ──────────────────────────────────────────────────────────────
 
 
@@ -540,6 +664,7 @@ def print_help():
         --export FORMAT    Export diagram (excalidraw | mermaid | json)
         --output FILE      Output file path (default: auto-generated)
         --watch            Watch mode (refresh every 5s)
+        --serve [PORT]     Start web dashboard (default port: 8080)
         --json             Alias for --export json
         --mermaid          Alias for --export mermaid
         --help             Show this message
@@ -572,6 +697,40 @@ def main():
         idx = args.index("--output")
         if idx + 1 < len(args):
             output_path = args[idx + 1]
+
+    # Parse --serve
+    serve_port = None
+    if "--serve" in args:
+        idx = args.index("--serve")
+        if idx + 1 < len(args) and args[idx + 1].isdigit():
+            serve_port = int(args[idx + 1])
+        else:
+            serve_port = 8080
+
+    if serve_port:
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+
+        class ArchVizHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                graph = build_graph()
+                self.wfile.write(render_html(graph).encode("utf-8"))
+
+            def log_message(self, format, *args):
+                pass  # quiet
+
+        server = HTTPServer(("0.0.0.0", serve_port), ArchVizHandler)
+        print(f"🌐 Arch-Viz dashboard: http://localhost:{serve_port}")
+        print(f"   Press Ctrl+C to stop")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\nServer stopped.")
+        return
 
     if watch_mode:
         try:
