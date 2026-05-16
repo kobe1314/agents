@@ -789,11 +789,31 @@ def render_html(graph: TopologyGraph) -> str:
   .cmd-desc {{ color: #8b949e; font-size: 12px; }}
   .meta {{ color: #8b949e; font-size: 12px; margin-top: 16px; text-align: center; }}
   .refresh {{ float: right; font-size: 12px; color: #8b949e; }}
+
+  /* Light theme */
+  body.light {{ background: #f8f9fa; color: #1e1e1e; }}
+  body.light h1 {{ color: #1971c2; }}
+  body.light .stat-card {{ background: #ffffff; border-color: #dee2e6; }}
+  body.light .stat-card .num {{ color: #212529; }}
+  body.light .section {{ background: #ffffff; border-color: #dee2e6; }}
+  body.light .section-title {{ background: #f8f9fa; border-color: #dee2e6; color: #495057; }}
+  body.light th {{ color: #868e96; border-color: #e9ecef; }}
+  body.light td {{ border-color: #e9ecef; }}
+  body.light code {{ background: #f1f3f5; color: #e67700; }}
+  body.light .skill-name {{ color: #1971c2; }}
+  body.light .skill-desc {{ color: #868e96; }}
+  body.light .cmd {{ color: #7048e8; }}
+  body.light .cmd-desc {{ color: #868e96; }}
+  body.light .subtitle {{ color: #868e96; }}
+  body.light .refresh {{ color: #adb5bd; }}
+  body.light .meta {{ color: #adb5bd; }}
+
+  .theme-btn {{ cursor: pointer; user-select: none; font-size: 12px; margin-left: 8px; }}
 </style>
 </head>
 <body>
   <h1>🧠 Arch-Viz  ·  {graph.project_name} Architecture</h1>
-  <div class="subtitle">Last collected: {graph.collected_at[:19]} <span class="refresh">🔄 Auto-refresh every 10s</span></div>
+  <div class="subtitle">Last collected: {graph.collected_at[:19]} <span class="refresh">🔄 Auto-refresh every 10s</span> <span class="theme-btn" onclick="toggleTheme()" id="themeBtn">☀️ Light</span></div>
 
   <div class="stats">
     <div class="stat-card"><div class="num">{graph.total_agents}</div><div class="label">Agents</div></div>
@@ -851,6 +871,20 @@ def render_html(graph: TopologyGraph) -> str:
   </div>
 
   <div class="meta">🔄 Page auto-refreshes every 10 seconds · Press Ctrl+C in terminal to stop</div>
+<script>
+(function() {{
+  var theme = localStorage.getItem('av-theme') || 'dark';
+  if (theme === 'light') {{
+    document.body.classList.add('light');
+    document.getElementById('themeBtn').textContent = '🌙 Dark';
+  }}
+}})();
+function toggleTheme() {{
+  var isLight = document.body.classList.toggle('light');
+  localStorage.setItem('av-theme', isLight ? 'light' : 'dark');
+  document.getElementById('themeBtn').textContent = isLight ? '🌙 Dark' : '☀️ Light';
+}}
+</script>
 </body>
 </html>"""
 
