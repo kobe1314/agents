@@ -957,6 +957,138 @@ def render_pipelines_html(pipelines: list[Pipeline]) -> str:
     return rows
 
 
+# ─── Review System ────────────────────────────────────────────────
+
+REVIEW_FILE = ARCH_VIZ_DIR / "reviews.json"
+
+@dataclass
+class Review:
+    id: str
+    title: str
+    description: str
+    author: str = "build"
+    reviewer: str = "reviewer"
+    status: str = "pending"  # pending | approved | changes_requested
+    comments: list = field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+    pipeline_id: str = ""
+
+
+def _load_reviews() -> list[Review]:
+    if not REVIEW_FILE.exists():
+        return []
+    try:
+        data = json.loads(REVIEW_FILE.read_text(encoding="utf-8"))
+        result = []
+        for r in data:
+            r["comments"] = r.get("comments", [])
+            result.append(Review(**r))
+        return result
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+
+def _save_reviews(reviews: list[Review]):
+    REVIEW_FILE.parent.mkdir(parents=True, exist_ok=True)
+    REVIEW_FILE.write_text(json.dumps([{**asdict(r)} for r in reviews], indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def review_create(title: str, description: str, pipeline_id: str = "") -> Review:
+    reviews = _load_reviews()
+    rid = f"review-{len(reviews) + 1:03d}"
+    r = Review(id=rid, title=title, description=description, pipeline_id=pipeline_id, created_at=datetime.now().isoformat(), updated_at=datetime.now().isoformat())
+    reviews.append(r)
+    _save_reviews(reviews)
+    return r
+
+
+def review_add_comment(review_id: str, author: str, text: str) -> bool:
+    reviews = _load_reviews()
+    for r in reviews:
+        if r.id == review_id:
+            r.comments.append({"author": author, "text": text, "at": datetime.now().isoformat()})
+            r.updated_at = datetime.now().isoformat()
+            _save_reviews(reviews)
+            return True
+    return False
+
+
+def review_approve(review_id: str) -> bool:
+    reviews = _load_reviews()
+    for r in reviews:
+        if r.id == review_id:
+            r.status = "approved"
+            r.updated_at = datetime.now().isoformat()
+            _save_reviews(reviews)
+            # If linked to a pipeline, advance it
+            if r.pipeline_id:
+                pipelines = _load_pipelines()
+                for p in pipelines:
+                    if p.id == r.pipeline_id and p.status == "waiting_review":
+                        p.status = "running"
+                        _save_pipelines(pipelines)
+                        pipeline_advance(r.pipeline_id)
+                        break
+            return True
+    return False
+
+
+def review_request_changes(review_id: str, comment: str) -> bool:
+    reviews = _load_reviews()
+    for r in reviews:
+        if r.id == review_id:
+            r.status = "changes_requested"
+            r.comments.append({"author": "reviewer", "text": comment, "at": datetime.now().isoformat()})
+            r.updated_at = datetime.now().isoformat()
+            _save_reviews(reviews)
+            return True
+    return False
+
+
+def review_submit_for_pipeline(pid: str) -> Optional[Review]:
+    """Create a review for a pipeline step (reviewer agent)."""
+    pipelines = _load_pipelines()
+    for p in pipelines:
+        if p.id == pid:
+            step = p.steps[p.current_step] if p.current_step < len(p.steps) else None
+            if step and step.agent == "reviewer":
+                r = review_create(f"Review: {p.name}", step.task, pipeline_id=pid)
+                p.status = "waiting_review"
+                _save_pipelines(pipelines)
+                return r
+    return None
+
+
+def render_reviews_terminal(reviews: list[Review]) -> str:
+    if not reviews:
+        return "  (no reviews)"
+    lines = []
+    for r in reviews[-10:]:
+        icon = {"pending": "⏳", "approved": "✅", "changes_requested": "🔄"}.get(r.status, "⬜")
+        comment_count = len(r.comments)
+        lines.append(f"  {icon} {r.id:<12} {r.title:<30} {r.status:<18} {comment_count} comments")
+        if r.comments:
+            last = r.comments[-1]
+            lines.append(f"      └─ {last['author']}: {last['text'][:50]}")
+    return "\n".join(lines)
+
+
+def render_reviews_html(reviews: list[Review]) -> str:
+    if not reviews:
+        return ""
+    rows = ""
+    for r in reviews[-5:]:
+        icon = {"pending": "⏳", "approved": "✅", "changes_requested": "🔄"}.get(r.status, "⬜")
+        last_comment = r.comments[-1]["text"][:60] if r.comments else ""
+        rows += f"<div style='padding:8px 16px;border-bottom:1px solid #21262d;font-size:12px;'>"
+        rows += f"<div><strong>{icon} {r.title}</strong> <span style='color:#8b949e;'>[{r.status}]</span></div>"
+        if last_comment:
+            rows += f"<div style='color:#8b949e;margin-top:2px;'>{last_comment}</div>"
+        rows += f"</div>"
+    return rows
+
+
 # ─── Main CLI ──────────────────────────────────────────────────────────────
 
 
@@ -979,6 +1111,11 @@ def print_help():
         --bg cancel TASK_ID   Cancel a task
         --pipeline NAME DESC STEP1..  Chain agents: agent:task
         --pipeline list       List all pipelines
+        --review submit TITLE DESC  Submit a review request
+        --review list         List all reviews
+        --review approve ID   Approve a review
+        --review changes ID TXT  Request changes
+        --review comment ID TXT   Add a comment
         --concurrency N       Max parallel tasks (default: 3)
         --help             Show this message
     """))
@@ -1096,6 +1233,17 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
                 if self.path.startswith("/api/tasks"):
                     tasks = bg_list()
                     html = render_bg_tasks_html(tasks)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(html.encode("utf-8"))
+                    return
+
+                # API: reviews
+                if self.path.startswith("/api/reviews"):
+                    current_reviews = _load_reviews()
+                    html = render_reviews_html(current_reviews)
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Cache-Control", "no-cache")
@@ -1231,6 +1379,52 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
         print(f"   Steps: {len(steps)} ({', '.join(s.agent for s in steps)})")
         print(f"   Run 'av --bg list' or 'av --pipeline list' to track progress")
         return
+
+    # Parse --review
+    if "--review" in args:
+        idx = args.index("--review")
+        rv_args = args[idx + 1:] if idx + 1 < len(args) else []
+        if not rv_args:
+            print("Usage: --review submit <title> <description>")
+            print("       --review list")
+            print("       --review approve <review_id>")
+            print("       --review changes <review_id> <comment>")
+            print("       --review comment <review_id> <text>")
+            return
+        sub = rv_args[0]
+        if sub == "submit" and len(rv_args) >= 3:
+            title = rv_args[1]
+            desc = " ".join(rv_args[2:])
+            r = review_create(title, desc)
+            print(f"📝 Review created: {r.id} ({r.title})")
+            print(f"   Status: {r.status}")
+            print(f"   Approve: av --review approve {r.id}")
+            return
+        elif sub == "list":
+            print(render_reviews_terminal(_load_reviews()))
+            return
+        elif sub == "approve" and len(rv_args) >= 2:
+            if review_approve(rv_args[1]):
+                print(f"✅ Approved: {rv_args[1]}")
+                # If pipeline is waiting, advance it
+            else:
+                print(f"Review not found: {rv_args[1]}")
+            return
+        elif sub == "changes" and len(rv_args) >= 3:
+            if review_request_changes(rv_args[1], " ".join(rv_args[2:])):
+                print(f"🔄 Changes requested: {rv_args[1]}")
+            else:
+                print(f"Review not found: {rv_args[1]}")
+            return
+        elif sub == "comment" and len(rv_args) >= 3:
+            if review_add_comment(rv_args[1], "reviewer", " ".join(rv_args[2:])):
+                print(f"💬 Comment added to {rv_args[1]}")
+            else:
+                print(f"Review not found: {rv_args[1]}")
+            return
+        else:
+            print(f"Unknown: {sub}")
+            return
 
     # Parse --bg subcommand
     if "--bg" in args:
