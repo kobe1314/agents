@@ -664,6 +664,7 @@ def bg_list() -> list[BackgroundTask]:
         _save_tasks(tasks)
         _try_start_pending()
     ralph_process_all()
+    pipeline_check_progress()
     return tasks
 
 
@@ -748,7 +749,163 @@ def render_bg_tasks_html(tasks: list[BackgroundTask]) -> str:
     return rows
 
 
-# ─── HTML Dashboard (for --serve) ──────────────────────────────────────────
+# ─── Pipeline Orchestrator ───────────────────────────────────────
+# Chains multiple agents: plan → build → test → review
+# Each step's output is automatically passed to the next.
+
+PIPELINE_FILE = ARCH_VIZ_DIR / "pipelines.json"
+
+@dataclass
+class PipelineStep:
+    agent: str
+    task: str
+    status: str = "pending"  # pending | running | completed | failed
+    task_id: Optional[str] = None
+    output: str = ""
+
+
+@dataclass
+class Pipeline:
+    id: str
+    name: str
+    description: str
+    steps: list[PipelineStep]
+    status: str = "pending"  # pending | running | completed | failed
+    current_step: int = 0
+    created_at: str = ""
+
+
+def _load_pipelines() -> list[Pipeline]:
+    if not PIPELINE_FILE.exists():
+        return []
+    try:
+        data = json.loads(PIPELINE_FILE.read_text(encoding="utf-8"))
+        result = []
+        for p in data:
+            p["steps"] = [PipelineStep(**s) for s in p.get("steps", [])]
+            result.append(Pipeline(**p))
+        return result
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+
+def _save_pipelines(pipelines: list[Pipeline]):
+    PIPELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PIPELINE_FILE.write_text(json.dumps([{**asdict(p)} for p in pipelines], indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def pipeline_create(name: str, description: str, steps: list[PipelineStep]) -> Pipeline:
+    pipelines = _load_pipelines()
+    pid = f"pipe-{len(pipelines) + 1:03d}"
+    p = Pipeline(id=pid, name=name, description=description, steps=steps, created_at=datetime.now().isoformat())
+    pipelines.append(p)
+    _save_pipelines(pipelines)
+    return p
+
+
+def pipeline_advance(pid: str) -> bool:
+    """Advance a pipeline: run the next pending step."""
+    pipelines = _load_pipelines()
+    for p in pipelines:
+        if p.id != pid:
+            continue
+        if p.status != "running":
+            return False
+        if p.current_step >= len(p.steps):
+            p.status = "completed"
+            _save_pipelines(pipelines)
+            return False
+
+        step = p.steps[p.current_step]
+        # Build the command: if there's output from previous step, append it
+        cmd = step.task
+        if p.current_step > 0:
+            prev = p.steps[p.current_step - 1]
+            if prev.output:
+                cmd += f" && echo '--- Previous output ---' && echo \"{prev.output[:200]}\""
+                cmd += f" && echo '--- End of previous output ---'"
+
+        task = bg_spawn(name=f"{pid}-step-{p.current_step + 1}", command=cmd)
+        step.task_id = task.id
+        step.status = "running"
+        p.status = "running"
+        _save_pipelines(pipelines)
+        return True
+    return False
+
+
+def pipeline_start(pid: str) -> bool:
+    """Start a pipeline from the beginning."""
+    pipelines = _load_pipelines()
+    for p in pipelines:
+        if p.id == pid:
+            p.status = "running"
+            p.current_step = 0
+            _save_pipelines(pipelines)
+            pipeline_advance(pid)
+            return True
+    return False
+
+
+def pipeline_check_progress():
+    """Check if current step is done, advance if so."""
+    pipelines = _load_pipelines()
+    changed = False
+    for p in pipelines:
+        if p.status != "running":
+            continue
+        step = p.steps[p.current_step]
+        if step.task_id:
+            tasks = _load_tasks()
+            for t in tasks:
+                if t.id == step.task_id:
+                    if t.status == "completed":
+                        step.status = "completed"
+                        step.output = bg_logs(step.task_id, tail=50) or ""
+                        p.current_step += 1
+                        changed = True
+                        # Check if pipeline is done
+                        if p.current_step >= len(p.steps):
+                            p.status = "completed"
+                        else:
+                            pipeline_advance(p.id)
+                    elif t.status == "failed":
+                        step.status = "failed"
+                        step.output = bg_logs(step.task_id, tail=20) or ""
+                        p.status = "failed"
+                        changed = True
+                    break
+    if changed:
+        _save_pipelines(pipelines)
+
+
+def render_pipelines_terminal(pipelines: list[Pipeline]) -> str:
+    if not pipelines:
+        return "  (no pipelines)"
+    lines = []
+    for p in pipelines[-5:]:
+        icon = {"running": "🟢", "completed": "✅", "failed": "❌", "pending": "⏸"}.get(p.status, "⬜")
+        lines.append(f"\n  {icon} {p.id} · {p.name}")
+        lines.append(f"     {p.description[:60]}")
+        for i, s in enumerate(p.steps):
+            sicon = {"running": "🟢", "completed": "✅", "failed": "❌", "pending": "⏳"}.get(s.status, "⬜")
+            marker = "→" if i == p.current_step else " "
+            lines.append(f"     {marker} {sicon} [{s.agent}] {s.task[:50]}")
+    return "\n".join(lines)
+
+
+def render_pipelines_html(pipelines: list[Pipeline]) -> str:
+    if not pipelines:
+        return ""
+    rows = ""
+    for p in pipelines[-3:]:
+        status_icon = {"running": "🟢", "completed": "✅", "failed": "❌", "pending": "⏸"}.get(p.status, "⬜")
+        steps_html = ""
+        for i, s in enumerate(p.steps):
+            sicon = {"running": "🟢", "completed": "✅", "failed": "❌", "pending": "🟡"}.get(s.status, "⬜")
+            steps_html += f"<div style='padding:4px 0;font-size:12px;'>{'&nbsp;&nbsp;' if i == p.current_step else ''}{sicon} [{s.agent}] {s.task[:40]}</div>"
+        rows += f"<div style='padding:8px 16px;border-bottom:1px solid #21262d;'><div style='font-weight:bold;font-size:13px;'>{status_icon} {p.name}</div>{steps_html}</div>"
+    return rows
 
 
 # ─── Main CLI ──────────────────────────────────────────────────────────────
@@ -767,6 +924,13 @@ def print_help():
         --serve [PORT]     Start web dashboard (default port: 8080)
         --json             Alias for --export json
         --mermaid          Alias for --export mermaid
+        --bg spawn NAME CMD   Spawn a background task
+        --bg list             List background tasks
+        --bg logs TASK_ID     Show task logs
+        --bg cancel TASK_ID   Cancel a task
+        --pipeline NAME DESC STEP1..  Chain agents: agent:task
+        --pipeline list       List all pipelines
+        --concurrency N       Max parallel tasks (default: 3)
         --help             Show this message
     """))
 
@@ -890,6 +1054,17 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
                     self.wfile.write(html.encode("utf-8"))
                     return
 
+                # API: pipelines
+                if self.path.startswith("/api/pipelines"):
+                    current_pipelines = _load_pipelines()
+                    html = render_pipelines_html(current_pipelines)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(html.encode("utf-8"))
+                    return
+
                 # API: Ralph Loop info
                 if self.path.startswith("/api/ralph"):
                     tasks = bg_list()
@@ -973,6 +1148,39 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
                 time.sleep(5)
         except KeyboardInterrupt:
             print("\nExiting watch mode.")
+        return
+
+    # Parse --pipeline list (must check before general --pipeline)
+    if "--pipeline" in args and "list" in args:
+        pipelines = _load_pipelines()
+        print(render_pipelines_terminal(pipelines))
+        return
+
+    # Parse --pipeline
+    if "--pipeline" in args:
+        idx = args.index("--pipeline")
+        pipe_args = args[idx + 1:] if idx + 1 < len(args) else []
+        if len(pipe_args) < 3:
+            print("Usage: --pipeline <name> <description> <step1> [step2] [step3] ...")
+            print("  Each step format: agent:task_description")
+            print("  Example: --pipeline '登录功能' '实现用户登录' 'plan:设计登录架构' 'build:实现登录' 'test:写登录测试' 'reviewer:审查代码'")
+            return
+        name = pipe_args[0]
+        desc = pipe_args[1]
+        step_specs = pipe_args[2:]
+        steps = []
+        for spec in step_specs:
+            if ":" in spec:
+                agent, task = spec.split(":", 1)
+            else:
+                agent = "build"
+                task = spec
+            steps.append(PipelineStep(agent=agent.strip(), task=task.strip()))
+        p = pipeline_create(name, desc, steps)
+        pipeline_start(p.id)
+        print(f"🚀 Pipeline created: {p.id} ({p.name})")
+        print(f"   Steps: {len(steps)} ({', '.join(s.agent for s in steps)})")
+        print(f"   Run 'av --bg list' or 'av --pipeline list' to track progress")
         return
 
     # Parse --bg subcommand

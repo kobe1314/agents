@@ -130,6 +130,11 @@
     </div>
   </div>
 
+  <div class="section" id="pipelineSection" style="display:none">
+    <div class="section-title">🔗 Pipelines <span class="refresh">agent chaining</span></div>
+    <div class="section-body" id="pipelineBody" style="padding:0;"><div style="padding:16px;color:#8b949e;font-size:12px;text-align:center;">No pipelines</div></div>
+  </div>
+
   <div class="meta">Arch-Viz · Architecture Visualization for Multi-Agent OpenCode Projects</div>
 </div>
 
@@ -189,6 +194,7 @@ function refreshAll(){
   var lo=document.getElementById('liveOutput');if(lo){fetch('/api/live').then(function(r){return r.text();}).then(function(h){lo.innerHTML=h;}).catch(function(){});}
   var tb=document.getElementById('tasksBody');if(tb){fetch('/api/tasks').then(function(r){return r.text();}).then(function(h){tb.innerHTML=h;}).catch(function(){});}
   var ri=document.getElementById('ralphInfo');if(ri){fetch('/api/ralph').then(function(r){return r.text();}).then(function(h){ri.innerHTML=h;}).catch(function(){});}
+  var pb=document.getElementById('pipelineBody');if(pb){fetch('/api/pipelines').then(function(r){return r.text();}).then(function(h){pb.innerHTML=h;document.getElementById('pipelineSection').style.display=h?'':'none';}).catch(function(){});}
 }
 setInterval(refreshAll,2000);
 </script>
