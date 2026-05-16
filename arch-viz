@@ -897,12 +897,12 @@ def render_html(graph: TopologyGraph) -> str:
   <div class="section">
     <div class="section-title">⚡ Concurrency Demo</div>
     <div class="section-body" style="padding:16px 20px;">
-      <button onclick="fetch('/api/spawn?name=sleep-3s&command=sleep+3+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 3s</button>
-      <button onclick="fetch('/api/spawn?name=sleep-5s&command=sleep+5+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 5s</button>
-      <button onclick="fetch('/api/spawn?name=sleep-8s&command=sleep+8+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 8s</button>
-      <button onclick="fetch('/api/spawn?name=ls-files&command=ls+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">📂 ls</button>
-      <button onclick="fetch('/api/spawn?name=count-md&command=find+.+-name+*.md+|+wc+-l')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔢 .md count</button>
-      <button onclick="fetch('/api/spawn?name=agent-exp&command=python3+agent-worker.py+explorer+4')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔍 Agent</button>
+      <button onclick="spawn('sleep-3s', 'echo Start...&&sleep 1&&echo 1/3&&sleep 1&&echo 2/3&&sleep 1&&echo Done!')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 3s w/ output</button>
+      <button onclick="spawn('sleep-8s', 'echo Start...&&sleep 2&&echo 2/8&&sleep 2&&echo 4/8&&sleep 2&&echo 6/8&&sleep 2&&echo Done!')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 8s w/ output</button>
+      <button onclick="spawn('sleep-15s', 'echo Start...&&sleep 3&&echo 3/15&&sleep 3&&echo 6/15&&sleep 3&&echo 9/15&&sleep 3&&echo 12/15&&sleep 3&&echo Done!')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 15s w/ output</button>
+      <button onclick="spawn('ls-files', 'ls&&echo done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">📂 ls</button>
+      <button onclick="spawn('count-md', 'find . -name *.md | wc -l')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔢 .md count</button>
+      <button onclick="spawn('agent-exp', 'python3 agent-worker.py explorer 4')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔍 Agent</button>
       <p style="font-size:11px;color:#8b949e;margin-top:8px;">Click any button → task appears in ⚡ Background Tasks below → check 📡 Live Output for real-time logs</p>
     </div>
   </div>
@@ -953,6 +953,13 @@ function toggleTheme() {{
   var isLight = document.body.classList.toggle('light');
   localStorage.setItem('av-theme', isLight ? 'light' : 'dark');
   document.getElementById('themeBtn').textContent = isLight ? '🌙 Dark' : '☀️ Light';
+}}
+
+function spawn(name, cmd) {{
+  var p = new URLSearchParams();
+  p.set('name', name);
+  p.set('command', cmd);
+  fetch('/api/spawn?' + p.toString()).catch(function(){{}});
 }}
 
 // Live Output refresh
@@ -1082,7 +1089,7 @@ def main():
 <span style="font-weight:600;font-size:12px;color:#58a6ff;">🟢 {t.name}</span>
 <span style="font-size:11px;color:#8b949e;">{t.id}</span>
 </div>
-<pre style="background:#1c2128;padding:10px 14px;border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:#c9d1d9;margin:0;">{tail or "(no output)"}</pre>
+                            <pre style="background:#1c2128;padding:10px 14px;border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:#c9d1d9;margin:0;">{tail or "⏳ running... (waiting for output)"}</pre>
 </div>""")
                         content = "".join(parts)
                     self.send_response(200)
