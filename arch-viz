@@ -538,20 +538,64 @@ def export_mermaid(graph: TopologyGraph, path: Path) -> str:
 
 
 def export_excalidraw(graph: TopologyGraph, path: Path) -> str:
-    """Export as Excalidraw diagram (reuse the existing generator)."""
-    # Try to run the existing generate-arch-viz-diagram.py
+    """Export as Excalidraw diagram with login module."""
     generator = PROJECT_ROOT / "generate-arch-viz-diagram.py"
     if generator.exists():
         import subprocess
-        result = subprocess.run(
-            [sys.executable, str(generator)],
-            capture_output=True, text=True, cwd=PROJECT_ROOT
-        )
-        if result.returncode == 0:
-            return str(PROJECT_ROOT / "arch-viz-architecture.excalidraw")
-        else:
-            print(f"Warning: generator failed: {result.stderr}", file=sys.stderr)
-            return ""
+        import json
+        result = subprocess.run([sys.executable, str(generator)], capture_output=True, text=True, cwd=PROJECT_ROOT)
+        output_path = PROJECT_ROOT / "arch-viz-architecture.excalidraw"
+        if result.returncode == 0 and output_path.exists():
+            # Append login module to the generated diagram
+            try:
+                diagram = json.loads(output_path.read_text(encoding="utf-8"))
+                els = diagram.get("elements", [])
+                # Add login module box (top of diagram)
+                import time
+                eid = lambda: f"el-{int(time.time()*100000) % 10**6}"
+                els.insert(0, {
+                    "type": "rectangle", "version": 1, "id": eid(),
+                    "x": 490, "y": 5, "width": 300, "height": 45, "angle": 0,
+                    "strokeColor": "#1e1e1e", "backgroundColor": "#d0ebff",
+                    "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
+                    "roughness": 0, "opacity": 100, "groupIds": [],
+                    "roundness": {"type": 3}, "boundElements": None, "updated": int(time.time()*1000),
+                    "link": None, "locked": False, "frameId": None, "isDeleted": False,
+                })
+                els.insert(1, {
+                    "type": "text", "version": 1, "id": eid(),
+                    "x": 500, "y": 12, "width": 280, "height": 30, "angle": 0,
+                    "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+                    "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
+                    "roughness": 0, "opacity": 100, "groupIds": [],
+                    "roundness": None, "boundElements": None, "updated": int(time.time()*1000),
+                    "link": None, "locked": False, "text": "🔐 Login (kobe/kobe) → Dashboard",
+                    "fontSize": 14, "fontFamily": 2, "textAlign": "center",
+                    "verticalAlign": "middle", "containerId": None, "autoResize": False,
+                    "lineHeight": 1.2, "frameId": None, "isDeleted": False, "originalText": "🔐 Login (kobe/kobe) → Dashboard",
+                })
+                # Arrow from login → main title
+                els.insert(2, {
+                    "type": "arrow", "version": 1, "id": eid(),
+                    "x": 640, "y": 50, "width": 0, "height": 40, "angle": 0,
+                    "strokeColor": "#1971c2", "backgroundColor": "transparent",
+                    "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
+                    "roughness": 0, "opacity": 80, "groupIds": [],
+                    "roundness": {"type": 2}, "boundElements": None,
+                    "updated": int(time.time()*1000), "link": None, "locked": False,
+                    "points": [[0, 0], [0, 40]], "lastCommittedPoint": None,
+                    "startBinding": None, "endBinding": None,
+                    "startArrowhead": None, "endArrowhead": "arrow", "frameId": None, "isDeleted": False,
+                })
+                diagram["elements"] = els
+                output_path.write_text(json.dumps(diagram, indent=2, ensure_ascii=False), encoding="utf-8")
+                return str(output_path)
+            except Exception:
+                pass
+        print(f"Warning: generator failed: {result.stderr}", file=sys.stderr)
+        return ""
+    print("Note: generate-arch-viz-diagram.py not found, generating minimal diagram", file=sys.stderr)
+    return ""
 
     # Fallback: generate minimal diagram
     print("Note: generate-arch-viz-diagram.py not found, generating minimal diagram", file=sys.stderr)
