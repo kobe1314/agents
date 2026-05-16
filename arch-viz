@@ -1234,6 +1234,50 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
             print(f"Unknown: {subcmd}")
             return
 
+    # --health: system health check
+    if "--health" in args:
+        import subprocess
+        print(f"\n{'='*50}")
+        print(f"  🩺 Arch-Viz Health Check")
+        print(f"{'='*50}")
+
+        # 1. Python
+        py_ver = sys.version.split()[0]
+        print(f"\n  Python:      {py_ver}")
+
+        # 2. Config
+        config_ok = "✅" if Path("opencode.json").exists() else "❌"
+        print(f"  Config:      {config_ok} opencode.json")
+
+        # 3. Background tasks
+        tasks = _load_tasks()
+        running = sum(1 for t in tasks if t.status == "running")
+        total = len(tasks)
+        print(f"  Tasks:       {total} total, {running} running")
+
+        # 4. Pipelines
+        pipelines = _load_pipelines()
+        active = sum(1 for p in pipelines if p.status == "running")
+        print(f"  Pipelines:   {len(pipelines)} total, {active} active")
+
+        # 5. MCP
+        mcp_ok = "✅" if any(t.status == "running" for t in tasks if "mcp" in t.name.lower()) else "?"
+        print(f"  MCP:         {mcp_ok}")
+
+        # 6. Dashboard
+        import subprocess as sp
+        port_check = sp.run(["lsof", "-ti", ":8080"], capture_output=True, text=True)
+        server_ok = "✅" if port_check.stdout.strip() else "❌"
+        print(f"  Dashboard:   {server_ok} (port 8080)")
+
+        # 7. Skills
+        skills_dir = Path(".agents/skills")
+        skills_count = len([d for d in skills_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]) if skills_dir.exists() else 0
+        print(f"  Skills:      {skills_count} installed")
+
+        print(f"\n{'='*50}\n")
+        return
+
     graph = build_graph()
 
     if export_format:
