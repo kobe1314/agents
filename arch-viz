@@ -1113,25 +1113,29 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
                     self.wfile.write(content.encode("utf-8"))
                     return
 
-                # API: live output
+                # API: live output (running + recently completed)
                 if self.path.startswith("/api/live"):
                     tasks = bg_list()
                     running = [t for t in tasks if t.status == "running"]
-                    if not running:
-                        content = "<div style='padding:20px;font-size:12px;color:#8b949e;text-align:center;'>No running tasks</div>"
+                    recent = [t for t in tasks if t.status in ("completed", "failed")][-3:]
+                    display = running + recent
+                    if not display:
+                        content = "<div style='padding:20px;font-size:12px;color:#8b949e;text-align:center;'>No tasks</div>"
                     else:
                         parts = []
-                        for t in running[:4]:
+                        for t in display[:6]:
                             tail = ""
                             if t.log_file and Path(t.log_file).exists():
                                 lines = Path(t.log_file).read_text(encoding="utf-8", errors="replace").splitlines()
                                 tail = "\n".join(lines[-6:])
-                            parts.append(f"""<div style="border-bottom:1px solid #21262d;padding:12px 16px;">
+                            icon = "🟢" if t.status == "running" else "✅" if t.status == "completed" else "❌"
+                            opacity = "1" if t.status == "running" else "0.6"
+                            parts.append(f"""<div style="border-bottom:1px solid #21262d;padding:12px 16px;opacity:{opacity};">
 <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-<span style="font-weight:600;font-size:12px;color:#58a6ff;">🟢 {t.name}</span>
-<span style="font-size:11px;color:#8b949e;">{t.id}</span>
+<span style="font-weight:600;font-size:12px;color:#58a6ff;">{icon} {t.name}</span>
+<span style="font-size:11px;color:#8b949e;">{t.status}</span>
 </div>
-                            <pre style="background:#1c2128;padding:10px 14px;border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:#c9d1d9;margin:0;">{tail or "⏳ running... (waiting for output)"}</pre>
+<pre style="background:#1c2128;padding:10px 14px;border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:#c9d1d9;margin:0;">{tail or "⏳ running..."}</pre>
 </div>""")
                         content = "".join(parts)
                     self.send_response(200)
