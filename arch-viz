@@ -959,19 +959,23 @@ function spawn(name, cmd) {{
   var p = new URLSearchParams();
   p.set('name', name);
   p.set('command', cmd);
-  fetch('/api/spawn?' + p.toString()).catch(function(){{}});
+  fetch('/api/spawn?' + p.toString()).then(function(){{ refreshAll(); }}).catch(function(){{}});
 }}
 
-// Live Output refresh
-setInterval(function() {{
+// Live Output + Task list + Ralph refresh
+function refreshAll() {{
   fetch('/api/live').then(function(r){{ return r.text(); }}).then(function(html) {{
     document.getElementById('liveOutput').innerHTML = html;
+  }}).catch(function(){{}});
+  fetch('/api/tasks').then(function(r){{ return r.text(); }}).then(function(html) {{
+    document.getElementById('tasksBody').innerHTML = html;
   }}).catch(function(){{}});
   fetch('/api/ralph').then(function(r){{ return r.text(); }}).then(function(html) {{
     var el = document.getElementById('ralphInfo');
     if (el) el.innerHTML = html;
   }}).catch(function(){{}});
-}}, 2000);
+}}
+setInterval(refreshAll, 2000);
 </script>
 </body>
 </html>"""
@@ -1079,6 +1083,17 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
                     self.wfile.write(f"Spawned: {t.id}".encode())
+                    return
+
+                # API: tasks list (AJAX refresh)
+                if self.path.startswith("/api/tasks"):
+                    tasks = bg_list()
+                    html = render_bg_tasks_html(tasks)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(html.encode("utf-8"))
                     return
 
                 # API: Ralph Loop info
