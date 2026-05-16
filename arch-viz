@@ -863,6 +863,13 @@ def render_html(graph: TopologyGraph) -> str:
   </div>
 
   <div class="section">
+    <div class="section-title">📡 Live Output <span class="refresh">task output, refresh 2s</span></div>
+    <div class="section-body" id="liveOutput" style="padding:0;">
+      <div style="padding:20px;font-size:12px;color:#8b949e;text-align:center;">No running tasks</div>
+    </div>
+  </div>
+
+  <div class="section">
     <div class="section-title">⚡ Background Tasks</div>
     <div class="section-body" style="overflow-x:auto;padding:0;">
       <table style="min-width:100%;"><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Time</th><th style="width:auto;">Command</th></tr></thead>
@@ -884,6 +891,13 @@ function toggleTheme() {{
   localStorage.setItem('av-theme', isLight ? 'light' : 'dark');
   document.getElementById('themeBtn').textContent = isLight ? '🌙 Dark' : '☀️ Light';
 }}
+
+// Live Output refresh
+setInterval(function() {{
+  fetch('/api/live').then(function(r){{ return r.text(); }}).then(function(html) {{
+    document.getElementById('liveOutput').innerHTML = html;
+  }}).catch(function(){{}});
+}}, 2000);
 </script>
 </body>
 </html>"""
@@ -950,6 +964,35 @@ def main():
 
         class ArchVizHandler(BaseHTTPRequestHandler):
             def do_GET(self):
+                # API: live output
+                if self.path.startswith("/api/live"):
+                    tasks = bg_list()
+                    running = [t for t in tasks if t.status == "running"]
+                    if not running:
+                        content = "<div style='padding:20px;font-size:12px;color:#8b949e;text-align:center;'>No running tasks</div>"
+                    else:
+                        parts = []
+                        for t in running[:4]:
+                            tail = ""
+                            if t.log_file and Path(t.log_file).exists():
+                                lines = Path(t.log_file).read_text(encoding="utf-8", errors="replace").splitlines()
+                                tail = "\n".join(lines[-6:])
+                            parts.append(f"""<div style="border-bottom:1px solid #21262d;padding:12px 16px;">
+<div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+<span style="font-weight:600;font-size:12px;color:#58a6ff;">🟢 {t.name}</span>
+<span style="font-size:11px;color:#8b949e;">{t.id}</span>
+</div>
+<pre style="background:#1c2128;padding:10px 14px;border-radius:6px;font-size:11px;line-height:1.5;overflow-x:auto;white-space:pre-wrap;color:#c9d1d9;margin:0;">{tail or "(no output)"}</pre>
+</div>""")
+                        content = "".join(parts)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(content.encode("utf-8"))
+                    return
+
+                # Default: dashboard
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
