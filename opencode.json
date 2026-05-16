@@ -158,7 +158,7 @@
       "command": ["npx", "-y", "@modelcontextprotocol/server-github"],
       "enabled": true,
       "environment": {
-        "GITHUB_TOKEN": "TOKEN_REMOVED"
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
       }
     }
   }
