@@ -561,6 +561,9 @@ class BackgroundTask:
     completed_at: Optional[str] = None
     exit_code: Optional[int] = None
     log_file: Optional[str] = None
+    ralph_loop: int = 0
+    ralph_count: int = 0
+    ralph_promise: str = ""
 
 
 def _ensure_dir():
@@ -615,10 +618,10 @@ def _try_start_pending():
             return
 
 
-def bg_spawn(name: str, command: str) -> BackgroundTask:
+def bg_spawn(name: str, command: str, ralph_loop: int = 0, ralph_promise: str = "") -> BackgroundTask:
     tasks = _load_tasks()
     tid = _next_id(tasks)
-    t = BackgroundTask(id=tid, name=name, command=command, status="pending", created_at=datetime.now().isoformat(), log_file=str(LOGS_DIR / f"{tid}.log"))
+    t = BackgroundTask(id=tid, name=name, command=command, status="pending", ralph_loop=ralph_loop, ralph_promise=ralph_promise, created_at=datetime.now().isoformat(), log_file=str(LOGS_DIR / f"{tid}.log"))
     if _running_count(tasks) < MAX_CONCURRENCY:
         _start_task(t)
     tasks.append(t)
@@ -660,6 +663,7 @@ def bg_list() -> list[BackgroundTask]:
     if changed:
         _save_tasks(tasks)
         _try_start_pending()
+    ralph_process_all()
     return tasks
 
 
@@ -692,6 +696,38 @@ def bg_logs(task_id: str, tail: int = 50) -> Optional[str]:
             lines = Path(t.log_file).read_text(encoding="utf-8").splitlines()
             return "\n".join(lines[-tail:])
     return None
+
+
+def ralph_retry(task_id: str) -> bool:
+    """Ralph Loop: retry a failed task. Returns True if retried."""
+    tasks = _load_tasks()
+    for t in tasks:
+        if t.id != task_id: continue
+        if t.ralph_loop <= 0 or t.ralph_count >= t.ralph_loop: return False
+        if t.ralph_promise and t.log_file and Path(t.log_file).exists():
+            if t.ralph_promise in Path(t.log_file).read_text(errors="replace"):
+                t.status = "completed"
+                t.exit_code = 0
+                _save_tasks(tasks)
+                return False
+        t.ralph_count += 1
+        t.status = "pending"
+        t.pid = None
+        t.exit_code = None
+        t.started_at = None
+        t.completed_at = None
+        if t.log_file and Path(t.log_file).exists(): Path(t.log_file).write_text("")
+        _save_tasks(tasks)
+        _try_start_pending()
+        return True
+    return False
+
+
+def ralph_process_all():
+    """Run Ralph Loop on all failed tasks."""
+    for t in _load_tasks():
+        if t.status == "failed" and t.ralph_loop > 0:
+            ralph_retry(t.id)
 
 
 def render_bg_tasks_html(tasks: list[BackgroundTask]) -> str:
@@ -857,9 +893,36 @@ def render_html(graph: TopologyGraph) -> str:
     <div class="section-body"><ul>{commands_list}</ul></div>
   </div>
 
+
+  <div class="section">
+    <div class="section-title">⚡ Concurrency Demo</div>
+    <div class="section-body" style="padding:16px 20px;">
+      <button onclick="fetch('/api/spawn?name=sleep-3s&command=sleep+3+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 3s</button>
+      <button onclick="fetch('/api/spawn?name=sleep-5s&command=sleep+5+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 5s</button>
+      <button onclick="fetch('/api/spawn?name=sleep-8s&command=sleep+8+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 8s</button>
+      <button onclick="fetch('/api/spawn?name=ls-files&command=ls+&&+echo+done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">📂 ls</button>
+      <button onclick="fetch('/api/spawn?name=count-md&command=find+.+-name+*.md+|+wc+-l')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔢 .md count</button>
+      <button onclick="fetch('/api/spawn?name=agent-exp&command=python3+agent-worker.py+explorer+4')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔍 Agent</button>
+      <p style="font-size:11px;color:#8b949e;margin-top:8px;">Click any button → task appears in ⚡ Background Tasks below → check 📡 Live Output for real-time logs</p>
+    </div>
+  </div>
+
   <div class="section">
     <div class="section-title">📁 Rules</div>
     <div class="section-body"><ul>{rules_list}</ul></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🔄 Ralph Loop <span class="refresh">auto-retry failed tasks</span></div>
+    <div class="section-body" style="padding:16px 20px;">
+      <p style="font-size:12px;color:#8b949e;margin-bottom:8px;">
+        Click to spawn a task that always fails. Ralph Loop retries it automatically.
+      </p>
+      <button onclick="fetch('/api/spawn?name=ralph-demo&command=echo+Failing...&&exit+1&ralph_loop=4')" style="padding:6px 12px;border:1px solid #e03131;border-radius:6px;background:#161b22;color:#e03131;cursor:pointer;font-size:12px;margin:2px;">❌ Fail x4 Retry</button>
+      <button onclick="fetch('/api/spawn?name=ralph-3x&command=exit+1&ralph_loop=3')" style="padding:6px 12px;border:1px solid #e67700;border-radius:6px;background:#161b22;color:#e67700;cursor:pointer;font-size:12px;margin:2px;">🔄 Fail x3 Retry</button>
+      <button onclick="fetch('/api/spawn?name=promise-demo&command=echo+all+tests+pass&&exit+1&ralph_loop=3&ralph_promise=all+tests+pass')" style="padding:6px 12px;border:1px solid #2f9e44;border-radius:6px;background:#161b22;color:#2f9e44;cursor:pointer;font-size:12px;margin:2px;">✅ Promise Demo</button>
+      <div id="ralphInfo" style="font-size:12px;color:#8b949e;margin-top:8px;"></div>
+    </div>
   </div>
 
   <div class="section">
@@ -896,6 +959,10 @@ function toggleTheme() {{
 setInterval(function() {{
   fetch('/api/live').then(function(r){{ return r.text(); }}).then(function(html) {{
     document.getElementById('liveOutput').innerHTML = html;
+  }}).catch(function(){{}});
+  fetch('/api/ralph').then(function(r){{ return r.text(); }}).then(function(html) {{
+    var el = document.getElementById('ralphInfo');
+    if (el) el.innerHTML = html;
   }}).catch(function(){{}});
 }}, 2000);
 </script>
@@ -964,6 +1031,39 @@ def main():
 
         class ArchVizHandler(BaseHTTPRequestHandler):
             def do_GET(self):
+                # API: spawn a task
+                if self.path.startswith("/api/spawn"):
+                    from urllib.parse import urlparse, parse_qs
+                    params = parse_qs(urlparse(self.path).query)
+                    name = params.get("name", ["task"])[0]
+                    cmd = params.get("command", ["echo ok"])[0]
+                    rl = int(params.get("ralph_loop", [0])[0])
+                    rp = params.get("ralph_promise", [""])[0]
+                    t = bg_spawn(name, cmd, ralph_loop=rl, ralph_promise=rp)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers()
+                    self.wfile.write(f"Spawned: {t.id}".encode())
+                    return
+
+                # API: Ralph Loop info
+                if self.path.startswith("/api/ralph"):
+                    tasks = bg_list()
+                    ralph_tasks = [t for t in tasks if t.ralph_loop > 0]
+                    lines = []
+                    for t in ralph_tasks[-10:]:
+                        icon = {"running":"🟢","pending":"🟡","completed":"✅","failed":"❌","cancelled":"⏹"}.get(t.status,"⬜")
+                        promise = f" promise:'{t.ralph_promise[:20]}'" if t.ralph_promise else ""
+                        lines.append(f"<div style='padding:4px 0;font-size:12px;border-bottom:1px solid #21262d;'>{t.id} {t.name} {icon} {t.status} retry {t.ralph_count}/{t.ralph_loop}{promise}</div>")
+                    content = "".join(lines) if lines else "<div style='color:#8b949e;'>no ralph loops active</div>"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(content.encode("utf-8"))
+                    return
+
                 # API: live output
                 if self.path.startswith("/api/live"):
                     tasks = bg_list()
@@ -1037,9 +1137,23 @@ def main():
         subcmd = bg_args[0]
         if subcmd == "spawn" and len(bg_args) >= 3:
             name = bg_args[1]
-            cmd = " ".join(bg_args[2:])
-            t = bg_spawn(name, cmd)
-            print(f"🟢 Spawned: {t.id} ({t.name})  PID: {t.pid}")
+            rl = 0
+            rp = ""
+            cmd_parts = bg_args[2:]
+            if "--ralph" in cmd_parts:
+                i = cmd_parts.index("--ralph")
+                rl = int(cmd_parts[i+1]) if i+1 < len(cmd_parts) else 3
+                cmd_parts = cmd_parts[:i] + cmd_parts[i+2:]
+            if "--promise" in cmd_parts:
+                i = cmd_parts.index("--promise")
+                rp = cmd_parts[i+1] if i+1 < len(cmd_parts) else ""
+                cmd_parts = cmd_parts[:i] + cmd_parts[i+2:]
+            cmd = " ".join(cmd_parts)
+            t = bg_spawn(name, cmd, ralph_loop=rl, ralph_promise=rp)
+            info = f"🟢 Spawned: {t.id} ({t.name})  PID: {t.pid}"
+            if rl: info += f"  Ralph: {rl}x"
+            if rp: info += f"  promise: '{rp}'"
+            print(info)
             return
         elif subcmd == "list":
             tasks = bg_list()
