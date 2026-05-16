@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="refresh" content="10">
+<!-- No meta refresh - all updates via JavaScript -->
 <title>Arch-Viz</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -197,6 +197,7 @@ function refreshAll(){
   var pb=document.getElementById('pipelineBody');if(pb){fetch('/api/pipelines').then(function(r){return r.text();}).then(function(h){pb.innerHTML=h;document.getElementById('pipelineSection').style.display=h?'':'none';}).catch(function(){});}
 }
 setInterval(refreshAll,2000);
+setInterval(loadGraph,30000); // full data refresh every 30s
 </script>
 </body>
 </html>
