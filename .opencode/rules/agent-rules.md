@@ -50,7 +50,16 @@ av --pipeline "功能名" "描述" \
 | YOU MUST NOT | Write tests — delegate to @test via --bg spawn |
 | YOU MUST | Wait for user to run `av --review approve` before starting build |
 | YOU MUST | Run @reviewer before /commit |
+| **YOU MUST** | **Use GitHub MCP for ALL git operations (commit/push/PR). NEVER use raw `git` commands.** |
+| **YOU MUST** | **Before running ANY shell command, check if an MCP tool exists for that task first.** |
+
+## MCP Priority
+
+When you need to do something, check in this order:
+1. Is there an MCP tool for it? → Use MCP
+2. Is there a skill for it? → Load the skill
+3. Only if neither exists → Use shell commands
 
 ## Violation consequence
 
-If you write implementation code before review approval, you are violating the project's mandatory process. The user will notice because there will be no review record in the pipeline.
+If you write implementation code before review approval, or use raw git commands instead of GitHub MCP, you are violating the project's mandatory process. The user will notice.
