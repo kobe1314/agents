@@ -550,30 +550,30 @@ def export_excalidraw(graph: TopologyGraph, path: Path) -> str:
             try:
                 diagram = json.loads(output_path.read_text(encoding="utf-8"))
                 els = diagram.get("elements", [])
-                # Add login badge at top (no overlap with existing elements)
+                # Login module (between subtitle and CLI layer, no overlap)
                 import time
                 eid = lambda: f"el-{int(time.time()*100000) % 10**6}"
-                # Thin colored bar across the top (behind everything)
-                els.insert(0, {
+                # Box
+                els.insert(2, {
                     "type": "rectangle", "version": 1, "id": eid(),
-                    "x": 0, "y": 0, "width": 1280, "height": 16, "angle": 0,
-                    "strokeColor": "#1971c2", "backgroundColor": "#1971c2",
-                    "fillStyle": "solid", "strokeWidth": 0, "strokeStyle": "solid",
-                    "roughness": 0, "opacity": 20, "groupIds": [],
-                    "roundness": None, "boundElements": None, "updated": int(time.time()*1000),
+                    "x": 440, "y": 63, "width": 400, "height": 22, "angle": 0,
+                    "strokeColor": "#2f9e44", "backgroundColor": "#b2f2bb",
+                    "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
+                    "roughness": 0, "opacity": 100, "groupIds": [],
+                    "roundness": {"type": 3}, "boundElements": None, "updated": int(time.time()*1000),
                     "link": None, "locked": False, "frameId": None, "isDeleted": False,
                 })
-                els.insert(1, {
+                els.insert(3, {
                     "type": "text", "version": 1, "id": eid(),
-                    "x": 10, "y": 0, "width": 300, "height": 16, "angle": 0,
-                    "strokeColor": "#1971c2", "backgroundColor": "transparent",
+                    "x": 450, "y": 66, "width": 380, "height": 16, "angle": 0,
+                    "strokeColor": "#2f9e44", "backgroundColor": "transparent",
                     "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
-                    "roughness": 0, "opacity": 80, "groupIds": [],
+                    "roughness": 0, "opacity": 100, "groupIds": [],
                     "roundness": None, "boundElements": None, "updated": int(time.time()*1000),
-                    "link": None, "locked": False, "text": "🔐 Login: kobe/kobe  →  Authorized access to all modules below",
-                    "fontSize": 11, "fontFamily": 2, "textAlign": "left",
+                    "link": None, "locked": False, "text": "🔐 Login: kobe/kobe  |  Authorized users can access all agents, skills, and MCP services",
+                    "fontSize": 10, "fontFamily": 2, "textAlign": "center",
                     "verticalAlign": "middle", "containerId": None, "autoResize": False,
-                    "lineHeight": 1, "frameId": None, "isDeleted": False, "originalText": "🔐 Login: kobe/kobe  →  Authorized access to all modules below",
+                    "lineHeight": 1, "frameId": None, "isDeleted": False, "originalText": "🔐 Login: kobe/kobe  |  Authorized users can access all agents, skills, and MCP services",
                 })
                 diagram["elements"] = els
                 output_path.write_text(json.dumps(diagram, indent=2, ensure_ascii=False), encoding="utf-8")
