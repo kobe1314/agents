@@ -789,7 +789,7 @@ def render_html(graph: TopologyGraph) -> str:
         desc = cmd.get("description", "")
         commands_list += f"<li><span class='cmd'>/{cmd['name']}</span> → @{agent} <span class='cmd-desc'>{desc}</span></li>"
 
-    rules_list = "".join(f"<li>{r.name}.md</li>" for r in graph.rules)
+    rules_list = "".join(f'<li><a href="/rules/{r.name}.md" target="_blank" style="color:#58a6ff;text-decoration:none;">{r.name}.md</a></li>' for r in graph.rules)
 
     bg_tasks = bg_list()
     bg_tasks_html = render_bg_tasks_html(bg_tasks)
@@ -1038,6 +1038,33 @@ def main():
 
         class ArchVizHandler(BaseHTTPRequestHandler):
             def do_GET(self):
+                # Route: /rules/<filename> → serve rule file content
+                if self.path.startswith("/rules/"):
+                    filename = self.path[len("/rules/"):]
+                    rule_file = PROJECT_ROOT / ".opencode" / "rules" / filename
+                    if rule_file.exists() and rule_file.is_file():
+                        content = rule_file.read_text(encoding="utf-8")
+                        highlighted = content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                        html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>{filename} - Arch-Viz</title>
+<style>body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',monospace;background:#0d1117;color:#c9d1d9;padding:24px;max-width:800px;margin:0 auto;}}
+a{{color:#58a6ff;text-decoration:none;}}a:hover{{text-decoration:underline;}}
+pre{{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;overflow-x:auto;white-space:pre-wrap;font-size:13px;line-height:1.5;color:#e6edf3;}}
+h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
+<h1>📁 {filename}</h1>
+<a href="/" target="_top">← Back to dashboard</a>
+<pre>{highlighted}</pre></body></html>"""
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/html; charset=utf-8")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.end_headers()
+                        self.wfile.write(html.encode("utf-8"))
+                        return
+                    else:
+                        self.send_response(404)
+                        self.end_headers()
+                        self.wfile.write(b"Rule not found")
+                        return
+
                 # API: spawn a task
                 if self.path.startswith("/api/spawn"):
                     from urllib.parse import urlparse, parse_qs
