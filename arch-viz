@@ -866,7 +866,32 @@ def pipeline_advance(pid: str) -> bool:
             return False
 
         step = p.steps[p.current_step]
-        # Build the command: if there's output from previous step, append it
+        # Plan step: just mark completed (planning happens in conversation)
+        if step.agent == "plan":
+            step.status = "completed"
+            step.output = "(Design produced in conversation)"
+            p.current_step += 1
+            _save_pipelines(pipelines)
+            if p.current_step >= len(p.steps):
+                p.status = "completed"
+            else:
+                pipeline_advance(pid)
+            return True
+
+        # Reviewer step: create review, wait for approval
+        if step.agent == "reviewer":
+            review = review_create(f"Review: {p.name} (step {p.current_step + 1})", step.task, pipeline_id=pid)
+            step.status = "pending"
+            p.status = "waiting_review"
+            _save_pipelines(pipelines)
+            print(f"\n📝 Review required: {review.id}")
+            print(f"   Title: {review.title}")
+            print(f"   Description: {step.task}")
+            print(f"   Approve: av --review approve {review.id}")
+            print(f"   Request changes: av --review changes {review.id} 'your feedback'")
+            return False
+
+        # For non-reviewer steps: spawn a background task
         cmd = step.task
         if p.current_step > 0:
             prev = p.steps[p.current_step - 1]
@@ -901,8 +926,26 @@ def pipeline_check_progress():
     pipelines = _load_pipelines()
     changed = False
     for p in pipelines:
-        if p.status != "running":
+        if p.status not in ("running", "waiting_review"):
             continue
+        # If waiting for review, check if review has been approved
+        if p.status == "waiting_review":
+            reviews = _load_reviews()
+            for r in reviews:
+                if r.pipeline_id == p.id and r.status == "approved":
+                    step = p.steps[p.current_step]
+                    step.status = "completed"
+                    step.output = "(approved via review)"
+                    p.current_step += 1
+                    changed = True
+                    p.status = "running"
+                    if p.current_step >= len(p.steps):
+                        p.status = "completed"
+                    else:
+                        pipeline_advance(p.id)
+                    break
+            continue
+
         step = p.steps[p.current_step]
         if step.task_id:
             tasks = _load_tasks()
@@ -933,7 +976,7 @@ def render_pipelines_terminal(pipelines: list[Pipeline]) -> str:
         return "  (no pipelines)"
     lines = []
     for p in pipelines[-5:]:
-        icon = {"running": "🟢", "completed": "✅", "failed": "❌", "pending": "⏸"}.get(p.status, "⬜")
+        icon = {"running": "🟢", "completed": "✅", "failed": "❌", "pending": "⏸", "waiting_review": "📝"}.get(p.status, "⬜")
         lines.append(f"\n  {icon} {p.id} · {p.name}")
         lines.append(f"     {p.description[:60]}")
         for i, s in enumerate(p.steps):
@@ -1021,14 +1064,22 @@ def review_approve(review_id: str) -> bool:
             r.status = "approved"
             r.updated_at = datetime.now().isoformat()
             _save_reviews(reviews)
-            # If linked to a pipeline, advance it
+            # If linked to a pipeline, advance it directly
             if r.pipeline_id:
                 pipelines = _load_pipelines()
                 for p in pipelines:
                     if p.id == r.pipeline_id and p.status == "waiting_review":
+                        step = p.steps[p.current_step]
+                        step.status = "completed"
+                        step.output = "(approved via review)"
+                        p.current_step += 1
                         p.status = "running"
-                        _save_pipelines(pipelines)
-                        pipeline_advance(r.pipeline_id)
+                        _save_pipelines(pipelines)  # Save before advance
+                        if p.current_step >= len(p.steps):
+                            p.status = "completed"
+                            _save_pipelines(pipelines)
+                        else:
+                            pipeline_advance(p.id)
                         break
             return True
     return False
