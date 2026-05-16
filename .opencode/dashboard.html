@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="10">
+<title>Arch-Viz</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
+  body.light { background: #f8f9fa; color: #1e1e1e; }
+  .container { max-width: 1200px; margin: 0 auto; }
+  header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; }
+  header h1 { font-size:24px; color:#58a6ff; }
+  body.light header h1 { color:#1971c2; }
+  .subtitle { color:#8b949e; font-size:13px; margin-top:2px; }
+  body.light .subtitle { color:#868e96; }
+  .badge { display:inline-flex; gap:8px; }
+  .badge span { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:2px 10px; font-size:11px; color:#8b949e; }
+  body.light .badge span { background:#fff; border-color:#dee2e6; color:#868e96; }
+  .theme-toggle { cursor:pointer; user-select:none; font-size:12px; padding:6px 12px; border:1px solid #30363d; border-radius:8px; background:#161b22; color:#8b949e; }
+  body.light .theme-toggle { background:#fff; border-color:#dee2e6; }
+  .theme-toggle:hover { border-color:#58a6ff; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:24px; }
+  .stat-card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:16px 20px; }
+  body.light .stat-card { background:#fff; border-color:#dee2e6; }
+  .stat-card .num { font-size:28px; font-weight:bold; color:#58a6ff; }
+  body.light .stat-card .num { color:#1971c2; }
+  .stat-card .label { font-size:12px; color:#8b949e; margin-top:2px; }
+  body.light .stat-card .label { color:#868e96; }
+  .section { background:#161b22; border:1px solid #30363d; border-radius:8px; margin-bottom:16px; overflow:hidden; }
+  body.light .section { background:#fff; border-color:#dee2e6; }
+  .section-title { padding:12px 16px; font-size:14px; font-weight:bold; background:#1c2128; border-bottom:1px solid #30363d; color:#f0f6fc; display:flex; justify-content:space-between; }
+  body.light .section-title { background:#f8f9fa; border-color:#dee2e6; color:#495057; }
+  .section-body { padding:12px 16px; }
+  .section-body:empty { padding:0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; padding:8px; color:#8b949e; font-weight:500; border-bottom:1px solid #30363d; }
+  body.light th { color:#868e96; border-color:#e9ecef; }
+  td { padding:8px; border-bottom:1px solid #21262d; }
+  body.light td { border-color:#e9ecef; }
+  td:last-child code { word-break:break-all; }
+  tr.primary td:first-child { border-left:3px solid #58a6ff; }
+  tr.subagent td:first-child { border-left:3px solid #8b949e; }
+  code { background:#1c2128; padding:2px 6px; border-radius:4px; font-size:12px; color:#ffa657; }
+  body.light code { background:#f1f3f5; color:#e67700; }
+  ul { padding:4px 16px; }
+  li { padding:4px 0; font-size:13px; list-style:none; }
+  li::before { content:'›'; color:#484f58; font-weight:bold; margin-right:8px; }
+  body.light li::before { color:#adb5bd; }
+  a { color:#58a6ff; text-decoration:none; }
+  body.light a { color:#1971c2; }
+  a:hover { text-decoration:underline; }
+  .cmd { color:#d2a8ff; font-weight:bold; }
+  body.light .cmd { color:#7048e8; }
+  .cmd-desc { color:#8b949e; font-size:12px; }
+  body.light .cmd-desc { color:#868e96; }
+  .skill-name { color:#79c0ff; }
+  body.light .skill-name { color:#1971c2; }
+  .skill-desc { color:#8b949e; font-size:12px; }
+  body.light .skill-desc { color:#868e96; }
+  .refresh { float:right; font-size:12px; color:#8b949e; }
+  body.light .refresh { color:#adb5bd; }
+  .meta { color:#8b949e; font-size:12px; text-align:center; margin-top:16px; }
+  .demo-btn { padding:6px 12px; border:1px solid #30363d; border-radius:6px; background:#161b22; color:#c9d1d9; cursor:pointer; font-size:12px; margin:2px; }
+  body.light .demo-btn { background:#fff; border-color:#dee2e6; color:#1e1e1e; }
+  .demo-btn:hover { border-color:#58a6ff; }
+  @media (max-width:768px) { body { padding:16px; } .grid { grid-template-columns:repeat(2,1fr); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1 id="pageTitle">🧠 Arch-Viz</h1>
+      <div class="subtitle" id="pageSubtitle">Loading...</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div class="badge" id="pageBadge"></div>
+      <span class="theme-toggle" id="themeBtn" onclick="toggleTheme()">☀️ Light</span>
+    </div>
+  </header>
+
+  <div class="grid" id="statsGrid"></div>
+
+  <div class="section" style="display:none" id="agentsSection"><div class="section-title">🤖 Agents <span class="refresh" id="agentsCount"></span></div><div class="section-body"><table><thead><tr><th>Agent</th><th>Mode</th><th>Model</th><th>Tools</th><th>Description</th></tr></thead><tbody id="agentsBody"></tbody></table></div></div>
+
+  <div class="section" style="display:none" id="skillsSection"><div class="section-title">🛠️ Skills <span class="refresh" id="skillsCount"></span></div><div class="section-body"><table><thead><tr><th>Name</th><th>Description</th></tr></thead><tbody id="skillsBody"></tbody></table></div></div>
+
+  <div class="section" style="display:none" id="mcpSection"><div class="section-title">🔗 MCP Servers <span class="refresh" id="mcpCount"></span></div><div class="section-body"><table><thead><tr><th>Name</th><th>Type</th><th>Endpoint</th></tr></thead><tbody id="mcpBody"></tbody></table></div></div>
+
+  <div class="section" style="display:none" id="workflowsSection"><div class="section-title">📜 Workflows</div><div class="section-body"><ul id="workflowsBody"></ul></div></div>
+
+  <div class="section" style="display:none" id="commandsSection"><div class="section-title">📋 Commands <span class="refresh" id="commandsCount"></span></div><div class="section-body"><ul id="commandsBody"></ul></div></div>
+
+  <div class="section" style="display:none" id="rulesSection"><div class="section-title">📁 Rules <span class="refresh" id="rulesCount"></span></div><div class="section-body"><ul id="rulesBody"></ul></div></div>
+
+  <div class="section">
+    <div class="section-title">⚡ Concurrency Demo</div>
+    <div class="section-body" style="padding:16px 20px;">
+      <button class="demo-btn" onclick="spawn('sleep-3s','echo Start...&&sleep 1&&echo 1/3&&sleep 1&&echo 2/3&&sleep 1&&echo Done!')">😴 3s</button>
+      <button class="demo-btn" onclick="spawn('sleep-8s','echo Start...&&sleep 2&&echo 2/8&&sleep 2&&echo 4/8&&sleep 2&&echo 6/8&&sleep 2&&echo Done!')">😴 8s</button>
+      <button class="demo-btn" onclick="spawn('ls-files','ls')">📂 ls</button>
+      <button class="demo-btn" onclick="spawn('count-md','find . -name *.md -maxdepth 3 | wc -l')">🔢 .md count</button>
+      <p style="font-size:11px;color:#8b949e;margin-top:8px;">Tasks appear below in Background Tasks and Live Output</p>
+    </div>
+  </div>
+
+  <div class="section" id="ralphSection" style="display:none">
+    <div class="section-title">🔄 Ralph Loop <span class="refresh">auto-retry failed tasks</span></div>
+    <div class="section-body" style="padding:16px 20px;">
+      <p style="font-size:12px;color:#8b949e;margin-bottom:8px;">Spawn a task that always fails. Ralph Loop retries it automatically.</p>
+      <button class="demo-btn" style="border-color:#e03131;color:#e03131;" onclick="spawn('ralph-demo','echo Failing...&&exit 1',4)">❌ Fail x4</button>
+      <button class="demo-btn" style="border-color:#e67700;color:#e67700;" onclick="spawn('ralph-3x','exit 1',3)">🔄 Fail x3</button>
+      <button class="demo-btn" style="border-color:#2f9e44;color:#2f9e44;" onclick="spawn('promise-demo','echo all tests pass&&exit 1',3,'all tests pass')">✅ Promise Demo</button>
+      <div id="ralphInfo" style="font-size:12px;color:#8b949e;margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📡 Live Output <span class="refresh">refresh 2s</span></div>
+    <div class="section-body" id="liveOutput" style="padding:0;"><div style="padding:20px;font-size:12px;color:#8b949e;text-align:center;">Loading...</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">⚡ Background Tasks</div>
+    <div class="section-body" style="padding:0;overflow-x:auto;">
+      <table style="min-width:100%;"><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Time</th><th>Command</th></tr></thead>
+      <tbody id="tasksBody"><tr><td colspan="5" style="text-align:center;color:#8b949e;padding:16px;">Loading...</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="meta">Arch-Viz · Architecture Visualization for Multi-Agent OpenCode Projects</div>
+</div>
+
+<script>
+// ─── Theme ─────────────────────────────────────
+(function(){var t=localStorage.getItem('av-theme')||'dark';if(t==='light'){document.body.classList.add('light');document.getElementById('themeBtn').textContent='🌙 Dark';}})();
+function toggleTheme(){var l=document.body.classList.toggle('light');localStorage.setItem('av-theme',l?'light':'dark');document.getElementById('themeBtn').textContent=l?'🌙 Dark':'☀️ Light';}
+
+// ─── Load Graph Data ────────────────────────────
+async function loadGraph(){try{
+  var r=await fetch('/api/graph'),g=await r.json();
+
+  document.getElementById('pageTitle').textContent='🧠 Arch-Viz · '+g.project;
+  document.getElementById('pageSubtitle').textContent='Collected: '+g.collected_at.slice(0,19)+' · '+g.platform;
+  document.getElementById('pageBadge').innerHTML='<span>🔄 10s</span><span>'+g.platform+'</span>';
+
+  var stats='';var items=[['Agents',g.stats.agents],['Skills',g.stats.skills],['MCP',g.stats.mcps],['Commands',g.stats.commands],['Rules',g.stats.rules]];
+  items.forEach(function(i){stats+='<div class="stat-card"><div class="num">'+i[1]+'</div><div class="label">'+i[0]+'</div></div>';});
+  document.getElementById('statsGrid').innerHTML=stats;
+
+  if(g.agents.length){document.getElementById('agentsSection').style.display='';document.getElementById('agentsCount').textContent=g.agents.length+' total';}
+  var ab='';g.agents.forEach(function(a){var cls=a.mode==='primary'?'primary':'subagent';var tools=a.tools.slice(0,4).join(', ');ab+='<tr class="'+cls+'"><td><strong>@'+a.name+'</strong></td><td>'+a.mode+'</td><td><code>'+a.model.split('/').pop()+'</code></td><td>'+tools+'</td><td>'+a.description.slice(0,40)+'</td></tr>';});
+  document.getElementById('agentsBody').innerHTML=ab;
+
+  if(g.skills.length){document.getElementById('skillsSection').style.display='';document.getElementById('skillsCount').textContent=g.skills.length+' installed';}
+  var sb='';g.skills.forEach(function(s){var ver=s.version?' v'+s.version:'';var src=s.source?' ['+s.source+']':'';var desc=s.description.slice(0,60)+(s.description.length>60?'...':'');sb+='<tr><td><span class="skill-name">'+s.name+'</span>'+ver+src+'</td><td class="skill-desc">'+desc+'</td></tr>';});
+  document.getElementById('skillsBody').innerHTML=sb;
+
+  if(g.mcps.length){document.getElementById('mcpSection').style.display='';document.getElementById('mcpCount').textContent=g.mcps.length+' configured';}
+  var mb='';g.mcps.forEach(function(m){mb+='<tr><td>'+(m.enabled?'✅':'❌')+' '+m.name+'</td><td>'+m.type+'</td><td><code>'+m.endpoint.slice(0,50)+'</code></td></tr>';});
+  document.getElementById('mcpBody').innerHTML=mb;
+
+  if(g.workflows.length){document.getElementById('workflowsSection').style.display='';}
+  var wb='';g.workflows.slice(0,10).forEach(function(w){wb+='<li><code>'+w+'</code></li>';});
+  document.getElementById('workflowsBody').innerHTML=wb;
+
+  if(g.commands.length){document.getElementById('commandsSection').style.display='';document.getElementById('commandsCount').textContent=g.commands.length+' custom';}
+  var cb='';g.commands.forEach(function(c){cb+='<li><span class="cmd">/'+c.name+'</span> → @'+c.agent+' <span class="cmd-desc">'+(c.description||'')+'</span></li>';});
+  document.getElementById('commandsBody').innerHTML=cb;
+
+  if(g.rules.length){document.getElementById('rulesSection').style.display='';document.getElementById('rulesCount').textContent=g.rules.length+' files';}
+  var rb='';g.rules.forEach(function(r){rb+='<li><a href="/rules/'+r.name+'.md" target="_blank">'+r.name+'.md</a></li>';});
+  document.getElementById('rulesBody').innerHTML=rb;
+
+}catch(e){document.getElementById('pageSubtitle').textContent='Error loading: '+e.message;}}
+loadGraph();
+
+// ─── Spawn Tasks ────────────────────────────────
+function spawn(name,cmd,ralph,promise){
+  var p=new URLSearchParams();p.set('name',name);p.set('command',cmd);
+  if(ralph)p.set('ralph_loop',ralph);if(promise)p.set('ralph_promise',promise);
+  fetch('/api/spawn?'+p.toString()).then(function(){refreshAll();}).catch(function(){});
+}
+
+// ─── Refresh ────────────────────────────────────
+function refreshAll(){
+  var lo=document.getElementById('liveOutput');if(lo){fetch('/api/live').then(function(r){return r.text();}).then(function(h){lo.innerHTML=h;}).catch(function(){});}
+  var tb=document.getElementById('tasksBody');if(tb){fetch('/api/tasks').then(function(r){return r.text();}).then(function(h){tb.innerHTML=h;}).catch(function(){});}
+  var ri=document.getElementById('ralphInfo');if(ri){fetch('/api/ralph').then(function(r){return r.text();}).then(function(h){ri.innerHTML=h;}).catch(function(){});}
+}
+setInterval(refreshAll,2000);
+</script>
+</body>
+</html>

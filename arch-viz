@@ -751,236 +751,6 @@ def render_bg_tasks_html(tasks: list[BackgroundTask]) -> str:
 # ─── HTML Dashboard (for --serve) ──────────────────────────────────────────
 
 
-def render_html(graph: TopologyGraph) -> str:
-    """Render the dashboard as a self-contained HTML page."""
-    agents_rows = ""
-    for a in graph.agents:
-        tools = ", ".join(a.tools[:4])
-        mode_cls = "primary" if a.mode == "primary" else "subagent"
-        agents_rows += f"""<tr class="{mode_cls}">
-            <td><strong>@{a.name}</strong></td>
-            <td>{a.mode}</td>
-            <td><code>{a.model.split('/')[-1]}</code></td>
-            <td>{tools}</td>
-            <td>{a.description[:40]}</td>
-        </tr>"""
-
-    skills_lines = ""
-    for s in graph.skills:
-        ver = f" v{s.version}" if s.version else ""
-        src = f" [{s.source}]" if s.source else ""
-        desc = s.description[:60] + "..." if len(s.description) > 60 else s.description
-        skills_lines += f"""<tr>
-            <td><span class="skill-name">{s.name}</span>{ver}{src}</td>
-            <td class="skill-desc">{desc}</td>
-        </tr>"""
-
-    mcps_rows = ""
-    for m in graph.mcps:
-        status = "✅" if m.status == "connected" else "❌"
-        endpoint = " ".join(m.command) if m.command else (m.url or "-")
-        mcps_rows += f"<tr><td>{status} {m.name}</td><td>{m.type}</td><td><code>{endpoint[:50]}</code></td></tr>"
-
-    workflows = "".join(f"<li><code>{w}</code></li>" for w in graph.agent_workflows[:6])
-
-    commands_list = ""
-    for cmd in graph.commands:
-        agent = cmd.get("agent", "")
-        desc = cmd.get("description", "")
-        commands_list += f"<li><span class='cmd'>/{cmd['name']}</span> → @{agent} <span class='cmd-desc'>{desc}</span></li>"
-
-    rules_list = "".join(f'<li><a href="/rules/{r.name}.md" target="_blank" style="color:#58a6ff;text-decoration:none;">{r.name}.md</a></li>' for r in graph.rules)
-
-    bg_tasks = bg_list()
-    bg_tasks_html = render_bg_tasks_html(bg_tasks)
-
-    return f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="refresh" content="10">
-<title>Arch-Viz - {graph.project_name}</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }}
-  h1 {{ font-size: 24px; margin-bottom: 4px; color: #58a6ff; }}
-  .subtitle {{ color: #8b949e; font-size: 13px; margin-bottom: 24px; }}
-  .stats {{ display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }}
-  .stat-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px 24px; min-width: 120px; }}
-  .stat-card .num {{ font-size: 28px; font-weight: bold; color: #58a6ff; }}
-  .stat-card .label {{ font-size: 12px; color: #8b949e; margin-top: 2px; }}
-  .section {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 16px; overflow: hidden; }}
-  .section-title {{ padding: 12px 16px; font-size: 14px; font-weight: bold; background: #1c2128; border-bottom: 1px solid #30363d; color: #f0f6fc; }}
-  .section-body {{ padding: 12px 16px; }}
-  table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
-  th {{ text-align: left; padding: 8px; color: #8b949e; font-weight: 500; border-bottom: 1px solid #30363d; }}
-  td {{ padding: 8px; border-bottom: 1px solid #21262d; }}
-  tr.primary td:first-child {{ border-left: 3px solid #58a6ff; }}
-  tr.subagent td:first-child {{ border-left: 3px solid #8b949e; }}
-  code {{ background: #1c2128; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #ffa657; }}
-  li {{ padding: 4px 0; font-size: 13px; }}
-  .skill-name {{ color: #79c0ff; }}
-  .skill-desc {{ color: #8b949e; font-size: 12px; max-width: 400px; }}
-  .cmd {{ color: #d2a8ff; font-weight: bold; }}
-  .cmd-desc {{ color: #8b949e; font-size: 12px; }}
-  .meta {{ color: #8b949e; font-size: 12px; margin-top: 16px; text-align: center; }}
-  .refresh {{ float: right; font-size: 12px; color: #8b949e; }}
-
-  /* Light theme */
-  body.light {{ background: #f8f9fa; color: #1e1e1e; }}
-  body.light h1 {{ color: #1971c2; }}
-  body.light .stat-card {{ background: #ffffff; border-color: #dee2e6; }}
-  body.light .stat-card .num {{ color: #212529; }}
-  body.light .section {{ background: #ffffff; border-color: #dee2e6; }}
-  body.light .section-title {{ background: #f8f9fa; border-color: #dee2e6; color: #495057; }}
-  body.light th {{ color: #868e96; border-color: #e9ecef; }}
-  body.light td {{ border-color: #e9ecef; }}
-  body.light code {{ background: #f1f3f5; color: #e67700; }}
-  body.light .skill-name {{ color: #1971c2; }}
-  body.light .skill-desc {{ color: #868e96; }}
-  body.light .cmd {{ color: #7048e8; }}
-  body.light .cmd-desc {{ color: #868e96; }}
-  body.light .subtitle {{ color: #868e96; }}
-  body.light .refresh {{ color: #adb5bd; }}
-  body.light .meta {{ color: #adb5bd; }}
-
-  .theme-btn {{ cursor: pointer; user-select: none; font-size: 12px; margin-left: 8px; }}
-</style>
-</head>
-<body>
-  <h1>🧠 Arch-Viz  ·  {graph.project_name} Architecture</h1>
-  <div class="subtitle">Last collected: {graph.collected_at[:19]} <span class="refresh">🔄 Auto-refresh every 10s</span> <span class="theme-btn" onclick="toggleTheme()" id="themeBtn">☀️ Light</span></div>
-
-  <div class="stats">
-    <div class="stat-card"><div class="num">{graph.total_agents}</div><div class="label">Agents</div></div>
-    <div class="stat-card"><div class="num">{graph.total_skills}</div><div class="label">Skills</div></div>
-    <div class="stat-card"><div class="num">{graph.total_mcps}</div><div class="label">MCP Services</div></div>
-    <div class="stat-card"><div class="num">{len(graph.commands)}</div><div class="label">Commands</div></div>
-    <div class="stat-card"><div class="num">{len(graph.rules)}</div><div class="label">Rules</div></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">🤖 Agents</div>
-    <div class="section-body">
-      <table><thead><tr><th>Agent</th><th>Mode</th><th>Model</th><th>Tools</th><th>Description</th></tr></thead>
-      <tbody>{agents_rows}</tbody></table>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">🛠️ Skills</div>
-    <div class="section-body">
-      <table><thead><tr><th>Name</th><th>Description</th></tr></thead>
-      <tbody>{skills_lines}</tbody></table>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">🔗 MCP Servers</div>
-    <div class="section-body">
-      <table><thead><tr><th>Name</th><th>Type</th><th>Endpoint</th></tr></thead>
-      <tbody>{mcps_rows}</tbody></table>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">📜 Workflows</div>
-    <div class="section-body"><ul>{workflows}</ul></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">📋 Commands</div>
-    <div class="section-body"><ul>{commands_list}</ul></div>
-  </div>
-
-
-  <div class="section">
-    <div class="section-title">⚡ Concurrency Demo</div>
-    <div class="section-body" style="padding:16px 20px;">
-      <button onclick="spawn('sleep-3s', 'echo Start...&&sleep 1&&echo 1/3&&sleep 1&&echo 2/3&&sleep 1&&echo Done!')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 3s w/ output</button>
-      <button onclick="spawn('sleep-8s', 'echo Start...&&sleep 2&&echo 2/8&&sleep 2&&echo 4/8&&sleep 2&&echo 6/8&&sleep 2&&echo Done!')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 8s w/ output</button>
-      <button onclick="spawn('sleep-15s', 'echo Start...&&sleep 3&&echo 3/15&&sleep 3&&echo 6/15&&sleep 3&&echo 9/15&&sleep 3&&echo 12/15&&sleep 3&&echo Done!')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">😴 15s w/ output</button>
-      <button onclick="spawn('ls-files', 'ls&&echo done')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">📂 ls</button>
-      <button onclick="spawn('count-md', 'find . -name *.md | wc -l')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔢 .md count</button>
-      <button onclick="spawn('agent-exp', 'python3 agent-worker.py explorer 4')" style="padding:6px 12px;border:1px solid #30363d;border-radius:6px;background:#161b22;color:#c9d1d9;cursor:pointer;font-size:12px;margin:2px;">🔍 Agent</button>
-      <p style="font-size:11px;color:#8b949e;margin-top:8px;">Click any button → task appears in ⚡ Background Tasks below → check 📡 Live Output for real-time logs</p>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">📁 Rules</div>
-    <div class="section-body"><ul>{rules_list}</ul></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">🔄 Ralph Loop <span class="refresh">auto-retry failed tasks</span></div>
-    <div class="section-body" style="padding:16px 20px;">
-      <p style="font-size:12px;color:#8b949e;margin-bottom:8px;">
-        Click to spawn a task that always fails. Ralph Loop retries it automatically.
-      </p>
-      <button onclick="fetch('/api/spawn?name=ralph-demo&command=echo+Failing...&&exit+1&ralph_loop=4')" style="padding:6px 12px;border:1px solid #e03131;border-radius:6px;background:#161b22;color:#e03131;cursor:pointer;font-size:12px;margin:2px;">❌ Fail x4 Retry</button>
-      <button onclick="fetch('/api/spawn?name=ralph-3x&command=exit+1&ralph_loop=3')" style="padding:6px 12px;border:1px solid #e67700;border-radius:6px;background:#161b22;color:#e67700;cursor:pointer;font-size:12px;margin:2px;">🔄 Fail x3 Retry</button>
-      <button onclick="fetch('/api/spawn?name=promise-demo&command=echo+all+tests+pass&&exit+1&ralph_loop=3&ralph_promise=all+tests+pass')" style="padding:6px 12px;border:1px solid #2f9e44;border-radius:6px;background:#161b22;color:#2f9e44;cursor:pointer;font-size:12px;margin:2px;">✅ Promise Demo</button>
-      <div id="ralphInfo" style="font-size:12px;color:#8b949e;margin-top:8px;"></div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">📡 Live Output <span class="refresh">task output, refresh 2s</span></div>
-    <div class="section-body" id="liveOutput" style="padding:0;">
-      <div style="padding:20px;font-size:12px;color:#8b949e;text-align:center;">No running tasks</div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">⚡ Background Tasks</div>
-    <div class="section-body" style="overflow-x:auto;padding:0;">
-      <table style="min-width:100%;"><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Time</th><th style="width:auto;">Command</th></tr></thead>
-      <tbody>{bg_tasks_html}</tbody></table>
-    </div>
-  </div>
-
-  <div class="meta">🔄 Page auto-refreshes every 10 seconds · Press Ctrl+C in terminal to stop</div>
-<script>
-(function() {{
-  var theme = localStorage.getItem('av-theme') || 'dark';
-  if (theme === 'light') {{
-    document.body.classList.add('light');
-    document.getElementById('themeBtn').textContent = '🌙 Dark';
-  }}
-}})();
-function toggleTheme() {{
-  var isLight = document.body.classList.toggle('light');
-  localStorage.setItem('av-theme', isLight ? 'light' : 'dark');
-  document.getElementById('themeBtn').textContent = isLight ? '🌙 Dark' : '☀️ Light';
-}}
-
-function spawn(name, cmd) {{
-  var p = new URLSearchParams();
-  p.set('name', name);
-  p.set('command', cmd);
-  fetch('/api/spawn?' + p.toString()).then(function(){{ refreshAll(); }}).catch(function(){{}});
-}}
-
-// Live Output + Task list + Ralph refresh
-function refreshAll() {{
-  fetch('/api/live').then(function(r){{ return r.text(); }}).then(function(html) {{
-    document.getElementById('liveOutput').innerHTML = html;
-  }}).catch(function(){{}});
-  fetch('/api/tasks').then(function(r){{ return r.text(); }}).then(function(html) {{
-    document.getElementById('tasksBody').innerHTML = html;
-  }}).catch(function(){{}});
-  fetch('/api/ralph').then(function(r){{ return r.text(); }}).then(function(html) {{
-    var el = document.getElementById('ralphInfo');
-    if (el) el.innerHTML = html;
-  }}).catch(function(){{}});
-}}
-setInterval(refreshAll, 2000);
-</script>
-</body>
-</html>"""
-
-
 # ─── Main CLI ──────────────────────────────────────────────────────────────
 
 
@@ -1069,6 +839,30 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
                         self.wfile.write(b"Rule not found")
                         return
 
+                # API: graph data (JSON)
+                if self.path == "/api/graph":
+                    graph = build_graph()
+                    data = {
+                        "project": graph.project_name,
+                        "collected_at": graph.collected_at,
+                        "platform": graph.platform,
+                        "agents": [{"name": a.name, "mode": a.mode, "model": a.model, "tools": a.tools, "description": a.description, "color": a.color} for a in graph.agents],
+                        "skills": [{"name": s.name, "description": s.description, "version": s.version, "source": s.source} for s in graph.skills],
+                        "mcps": [{"name": m.name, "type": m.type, "enabled": m.enabled, "status": m.status, "endpoint": " ".join(m.command) if m.command else (m.url or "-")} for m in graph.mcps],
+                        "rules": [{"name": r.name, "path": r.path, "size": r.size} for r in graph.rules],
+                        "commands": graph.commands,
+                        "workflows": graph.agent_workflows,
+                        "stats": {"agents": graph.total_agents, "skills": graph.total_skills, "mcps": graph.total_mcps, "commands": len(graph.commands), "rules": len(graph.rules)},
+                        "max_concurrency": MAX_CONCURRENCY,
+                    }
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(data, indent=2).encode("utf-8"))
+                    return
+
                 # API: spawn a task
                 if self.path.startswith("/api/spawn"):
                     from urllib.parse import urlparse, parse_qs
@@ -1145,14 +939,18 @@ h1{{color:#58a6ff;font-size:20px;}}</style></head><body>
                     self.wfile.write(content.encode("utf-8"))
                     return
 
-                # Default: dashboard
+                # Default: dashboard (serve HTML file)
+                html_file = PROJECT_ROOT / ".opencode" / "dashboard.html"
+                if html_file.exists():
+                    content = html_file.read_text(encoding="utf-8")
+                else:
+                    content = "<html><body><h1>dashboard.html not found</h1></body></html>"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.end_headers()
-                graph = build_graph()
-                self.wfile.write(render_html(graph).encode("utf-8"))
+                self.wfile.write(content.encode("utf-8"))
 
             def log_message(self, format, *args):
                 pass  # quiet
