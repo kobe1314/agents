@@ -541,6 +541,177 @@ def export_excalidraw(graph: TopologyGraph, path: Path) -> str:
     return ""
 
 
+# ─── Background Task Manager ───────────────────────────────────────────────
+
+ARCH_VIZ_DIR = PROJECT_ROOT / ".arch-viz"
+TASKS_FILE = ARCH_VIZ_DIR / "tasks.json"
+LOGS_DIR = ARCH_VIZ_DIR / "logs"
+MAX_CONCURRENCY = 3
+
+
+@dataclass
+class BackgroundTask:
+    id: str
+    name: str
+    command: str
+    status: str = "pending"
+    pid: Optional[int] = None
+    created_at: str = ""
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    exit_code: Optional[int] = None
+    log_file: Optional[str] = None
+
+
+def _ensure_dir():
+    ARCH_VIZ_DIR.mkdir(parents=True, exist_ok=True)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_tasks() -> list[BackgroundTask]:
+    _ensure_dir()
+    if not TASKS_FILE.exists():
+        return []
+    try:
+        data = json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+        return [BackgroundTask(**t) for t in data]
+    except (json.JSONDecodeError, KeyError):
+        return []
+
+
+def _save_tasks(tasks: list[BackgroundTask]):
+    _ensure_dir()
+    TASKS_FILE.write_text(json.dumps([asdict(t) for t in tasks], indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _next_id(tasks: list[BackgroundTask]) -> str:
+    return f"task-{len(tasks) + 1:03d}"
+
+
+def _running_count(tasks: list[BackgroundTask]) -> int:
+    return sum(1 for t in tasks if t.status == "running")
+
+
+def _start_task(task: BackgroundTask):
+    import subprocess
+    task.status = "running"
+    task.started_at = datetime.now().isoformat()
+    status_file = Path(task.log_file).with_suffix(".exit")
+    wrapped = f"({task.command}); echo $? > {status_file}"
+    fh = Path(task.log_file).open("w", encoding="utf-8")
+    proc = subprocess.Popen(wrapped, shell=True, stdout=fh, stderr=subprocess.STDOUT, cwd=PROJECT_ROOT, preexec_fn=os.setsid if hasattr(os, 'setsid') else None)
+    task.pid = proc.pid
+    fh.close()
+
+
+def _try_start_pending():
+    tasks = _load_tasks()
+    if _running_count(tasks) >= MAX_CONCURRENCY:
+        return
+    for t in tasks:
+        if t.status == "pending":
+            _start_task(t)
+            _save_tasks(tasks)
+            return
+
+
+def bg_spawn(name: str, command: str) -> BackgroundTask:
+    tasks = _load_tasks()
+    tid = _next_id(tasks)
+    t = BackgroundTask(id=tid, name=name, command=command, status="pending", created_at=datetime.now().isoformat(), log_file=str(LOGS_DIR / f"{tid}.log"))
+    if _running_count(tasks) < MAX_CONCURRENCY:
+        _start_task(t)
+    tasks.append(t)
+    _save_tasks(tasks)
+    return t
+
+
+def _pid_alive(pid: int):
+    try:
+        exit_file = None
+        for t in _load_tasks():
+            if t.pid == pid and t.log_file:
+                exit_file = Path(t.log_file).with_suffix(".exit")
+                break
+        if exit_file and exit_file.exists():
+            ec = int(exit_file.read_text().strip().split()[0])
+            return False, ec
+        os.kill(pid, 0)
+        return True, None
+    except (ProcessLookupError, ValueError):
+        return False, -1
+    except PermissionError:
+        return True, None
+    except OSError:
+        return False, -1
+
+
+def bg_list() -> list[BackgroundTask]:
+    tasks = _load_tasks()
+    changed = False
+    for t in tasks:
+        if t.status == "running" and t.pid:
+            alive, ec = _pid_alive(t.pid)
+            if not alive:
+                t.status = "completed" if ec == 0 else "failed"
+                t.exit_code = ec
+                t.completed_at = datetime.now().isoformat()
+                changed = True
+    if changed:
+        _save_tasks(tasks)
+        _try_start_pending()
+    return tasks
+
+
+def bg_cancel(task_id: str) -> bool:
+    tasks = _load_tasks()
+    for t in tasks:
+        if t.id == task_id:
+            if t.status == "running" and t.pid:
+                try:
+                    os.kill(t.pid, 15)
+                    import time; time.sleep(0.3)
+                    try:
+                        os.kill(t.pid, 0)
+                        os.kill(t.pid, 9)
+                    except OSError:
+                        pass
+                except OSError:
+                    pass
+            t.status = "cancelled"
+            t.completed_at = datetime.now().isoformat()
+            _save_tasks(tasks)
+            _try_start_pending()
+            return True
+    return False
+
+
+def bg_logs(task_id: str, tail: int = 50) -> Optional[str]:
+    for t in _load_tasks():
+        if t.id == task_id and t.log_file and Path(t.log_file).exists():
+            lines = Path(t.log_file).read_text(encoding="utf-8").splitlines()
+            return "\n".join(lines[-tail:])
+    return None
+
+
+def render_bg_tasks_html(tasks: list[BackgroundTask]) -> str:
+    if not tasks:
+        return "<tr><td colspan='5' style='color:#8b949e;text-align:center;padding:16px;'>no background tasks</td></tr>"
+    active = [t for t in tasks if t.status in ("running", "pending")]
+    recent = [t for t in tasks if t.status not in ("running", "pending")][-5:]
+    icons = {"running": "🟢", "pending": "🟡", "completed": "✅", "failed": "❌", "cancelled": "⏹"}
+    rows = ""
+    for t in (active + recent)[:10]:
+        dur = ""
+        if t.started_at:
+            s = datetime.fromisoformat(t.started_at)
+            e = datetime.fromisoformat(t.completed_at) if t.completed_at else datetime.now()
+            dur = f"{int((e-s).total_seconds())}s"
+        cmd_short = t.command[:35] + "..." if len(t.command) > 38 else t.command
+        rows += f"<tr><td><code>{t.id}</code></td><td>{t.name}</td><td>{icons.get(t.status,'⬜')} {t.status}</td><td>{dur}</td><td><code>{cmd_short}</code></td></tr>"
+    return rows
+
+
 # ─── HTML Dashboard (for --serve) ──────────────────────────────────────────
 
 
@@ -583,6 +754,9 @@ def render_html(graph: TopologyGraph) -> str:
         commands_list += f"<li><span class='cmd'>/{cmd['name']}</span> → @{agent} <span class='cmd-desc'>{desc}</span></li>"
 
     rules_list = "".join(f"<li>{r.name}.md</li>" for r in graph.rules)
+
+    bg_tasks = bg_list()
+    bg_tasks_html = render_bg_tasks_html(bg_tasks)
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -666,6 +840,14 @@ def render_html(graph: TopologyGraph) -> str:
   <div class="section">
     <div class="section-title">📁 Rules</div>
     <div class="section-body"><ul>{rules_list}</ul></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">⚡ Background Tasks</div>
+    <div class="section-body" style="overflow-x:auto;padding:0;">
+      <table style="min-width:100%;"><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Time</th><th style="width:auto;">Command</th></tr></thead>
+      <tbody>{bg_tasks_html}</tbody></table>
+    </div>
   </div>
 
   <div class="meta">🔄 Page auto-refreshes every 10 seconds · Press Ctrl+C in terminal to stop</div>
@@ -764,6 +946,43 @@ def main():
         except KeyboardInterrupt:
             print("\nExiting watch mode.")
         return
+
+    # Parse --bg subcommand
+    if "--bg" in args:
+        idx = args.index("--bg")
+        bg_args = args[idx + 1:] if idx + 1 < len(args) else []
+        if not bg_args:
+            print("Usage: --bg spawn <name> <command>")
+            print("       --bg list")
+            print("       --bg logs <task_id>")
+            print("       --bg cancel <task_id>")
+            return
+        subcmd = bg_args[0]
+        if subcmd == "spawn" and len(bg_args) >= 3:
+            name = bg_args[1]
+            cmd = " ".join(bg_args[2:])
+            t = bg_spawn(name, cmd)
+            print(f"🟢 Spawned: {t.id} ({t.name})  PID: {t.pid}")
+            return
+        elif subcmd == "list":
+            tasks = bg_list()
+            if not tasks:
+                print("(no tasks)")
+            else:
+                for t in tasks[-15:]:
+                    icon = {"running": "🟢", "pending": "🟡", "completed": "✅", "failed": "❌", "cancelled": "⏹"}.get(t.status, "⬜")
+                    print(f"  {t.id:<10} {t.name:<20} {icon} {t.status:<12} {str(t.pid or '-'):<8} {t.command[:40]}")
+            return
+        elif subcmd == "logs" and len(bg_args) >= 2:
+            logs = bg_logs(bg_args[1])
+            print(logs or "No logs")
+            return
+        elif subcmd == "cancel" and len(bg_args) >= 2:
+            print("Cancelled" if bg_cancel(bg_args[1]) else "Not found")
+            return
+        else:
+            print(f"Unknown: {subcmd}")
+            return
 
     graph = build_graph()
 
