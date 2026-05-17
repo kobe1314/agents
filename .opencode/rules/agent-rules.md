@@ -4,40 +4,71 @@
 
 ---
 
-## YOU MUST follow this process for EVERY feature request, without exception:
+## THE COMPLETE WORKFLOW
 
-### Step 1: STOP. Do NOT write any code yet.
-Read this entire file before proceeding.
+### Phase 0: 接收需求
 
-### Step 2: Create a pipeline with review gate
 ```
-av --pipeline "功能名" "描述" \
-  "plan:出设计方案" \
-  "reviewer:审批方案" \
-  "build:实现" \
-  "test:写测试"
+收到需求
+  → 检查有没有对应 skill（excalidraw? react? memory?）
+  → 有 skill 先加载 skill
 ```
 
-### Step 3: Pipeline creates a review. YOU WAIT.
-- Pipeline will pause at "reviewer" step
-- A review is created automatically
-- Tell the user: `av --review approve <review_id>`
+### Phase 1: 需求分析
 
-### Step 4: DO NOTHING until user approves.
-- No design changes
-- No code writing
-- No testing
-- The `"build"` step waits for user approval
+```
+  → 分析需求
+  → 输出 .md 文档
+  → 记录拆分后的需求点
+```
 
-### Step 5: After approval, implement.
-- Pipeline continues automatically
-- Build step spawns as background task
+### Phase 2: 架构设计
 
-### Step 6: Delegate testing.
-- `av --bg spawn "test-xxx" "pytest ..."` — do NOT write tests yourself
+```
+  → @architect 生成架构图（excalidraw / mermaid）
+  → 交给用户 review
+  → 用户给 feedback
+  → 修改架构图
+  → 用户给 approval
+```
 
-### Step 7: Review before commit.
-- Run `@reviewer` on the diff
+**🚫 在 approval 之前，不允许开始任何实现代码**
+
+### Phase 3: 并行开发
+
+```
+  approval 后，同时开始：
+  ├── @build → 开始实现功能代码
+  └── @test  → 开始写测试（并行！）
+```
+
+### Phase 4: 审查
+
+```
+  build + test 都完成后：
+  → @reviewer 审查代码
+  → 如果是页面 → 打开浏览器验证
+  → 验证通过 → 交给用户验收
+```
+
+### Phase 5: 上线
+
+```
+  用户验收通过后：
+  → 调用 GitHub MCP 上传代码（不可用原始 git 命令）
+```
+
+---
+
+## 执行任何步骤前，先问：有没有对应的 skill？
+
+| 步骤 | 可能有的 skill |
+|------|---------------|
+| 画架构图 | excalidraw-diagram-generator |
+| 写前端 | react-best-practices |
+| 提交代码 | ce-commit-push-pr |
+| 找技能 | find-skills |
+| 记教训 | self-improving-agent, agent-memory |
 
 ---
 
@@ -45,21 +76,18 @@ av --pipeline "功能名" "描述" \
 
 | Rule | Description |
 |------|-------------|
-| YOU MUST | Create pipeline with reviewer step for every feature |
-| YOU MUST NOT | Write implementation code before review is approved |
-| YOU MUST NOT | Write tests — delegate to @test via --bg spawn |
-| YOU MUST | Wait for user to run `av --review approve` before starting build |
-| YOU MUST | Run @reviewer before /commit |
-| **YOU MUST** | **Use GitHub MCP for ALL git operations (commit/push/PR). NEVER use raw `git` commands.** |
-| **YOU MUST** | **Before running ANY shell command, check if an MCP tool exists for that task first.** |
+| YOU MUST | Check for relevant skill before every major step |
+| YOU MUST | Write .md requirement doc before any design |
+| YOU MUST | Use @architect for architecture diagrams |
+| YOU MUST NOT | Start coding before user approves the architecture |
+| YOU MUST | Run @test IN PARALLEL with @build (use --bg spawn) |
+| YOU MUST | Open browser to verify if it's a page |
+| YOU MUST | Use GitHub MCP for git operations, never raw git |
+| YOU MUST | Wait for user acceptance before uploading |
 
 ## MCP Priority
 
-When you need to do something, check in this order:
-1. Is there an MCP tool for it? → Use MCP
-2. Is there a skill for it? → Load the skill
-3. Only if neither exists → Use shell commands
-
-## Violation consequence
-
-If you write implementation code before review approval, or use raw git commands instead of GitHub MCP, you are violating the project's mandatory process. The user will notice.
+Before any operation, check in this order:
+1. Is there a skill for this? → Load it
+2. Is there an MCP tool? → Use it
+3. Only if neither → Use shell tools
