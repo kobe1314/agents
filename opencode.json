@@ -92,7 +92,7 @@
     },
     "architect": {
       "mode": "subagent",
-      "model": "deepseek/deepseek-reasoner",
+      "model": "deepseek/deepseek-v4",
       "description": "Design architecture and make technical decisions",
       "prompt": "You are a software architect. Design system architecture, evaluate trade-offs, and make technical recommendations. Never write implementation code.",
       "permission": {
@@ -149,7 +149,14 @@
       ".agents/skills/excalidraw-diagram-generator",
       ".agents/skills/find-skills",
       ".agents/skills/ce-commit-push-pr",
-      ".agents/skills/self-improving-agent"
+      ".agents/skills/self-improving-agent",
+      ".agents/skills/diagram-generator",
+      ".agents/skills/summarize",
+      ".agents/skills/agent-browser",
+      ".agents/skills/agent-memory",
+      ".agents/skills/handoff",
+      ".agents/skills/react-best-practices",
+      ".agents/skills/trigger-cost-savings"
     ]
   },
   "mcp": {
